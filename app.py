@@ -107,8 +107,13 @@ def write_markdown(df):
     # Append to docs/index.md
     index_path = output_dir / "index.md"
     index_path.touch(exist_ok=True)
-    with open(index_path, "a") as index_file:
+
+    with open(index_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    
+    with open(index_path, "w") as index_file:
         index_file.write(f"- [{timestamp}](./forecast_{timestamp}.md)\n")
+        index_file.writelines(lines)
 
     print(f"🔗 Index updated: {index_path}")
 
