@@ -1,4 +1,4 @@
-# alert_if_out_of_bounds.py (includes BTC)
+# alert_if_out_of_bounds.py (includes BTC + summary table with names and currency symbols)
 
 import yfinance as yf
 from prophet import Prophet
@@ -6,11 +6,28 @@ import pandas as pd
 from datetime import datetime
 
 # === Configuration ===
-TICKERS = ["^IXIC", "JEPI", "JEPQ", "HDV", "BTC-USD", "SCHD", "VYM"]  # NASDAQ, HDV ETF, and Bitcoin in USD
+TICKERS = [
+    "^IXIC", "^GSPC", "VXUS", "JEPI", "JEPQ", "HDV", "SCHD", "VYM",
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "NVDA",
+    "4755.T", "9432.T", "9434.T", "7203.T",
+    "BTC-USD", "GC=F"
+]
 DAYS_FORWARD = 30
+
+results = []  # Store summary info here
+
+def format_currency(ticker, value):
+    if ticker.endswith(".T") or ticker.endswith(".N"):
+        return f"¥{value:,.2f}"
+    else:
+        return f"${value:,.2f}"
 
 def analyze_ticker(ticker):
     print(f"\n▶ Analyzing {ticker}...")
+
+    ticker_obj = yf.Ticker(ticker)
+    info = ticker_obj.info
+    name = info.get("shortName") or info.get("longName") or "N/A"
 
     df = yf.download(ticker, start="2022-01-01", group_by="ticker", auto_adjust=False)
 
@@ -18,7 +35,6 @@ def analyze_ticker(ticker):
         print(f"⚠️ No data for {ticker}")
         return
 
-    # Handle MultiIndex column structure
     if isinstance(df.columns, pd.MultiIndex):
         try:
             df = df[ticker].copy()
@@ -26,7 +42,6 @@ def analyze_ticker(ticker):
             print(f"⚠️ Could not extract sub-DataFrame for {ticker}")
             return
 
-    # Check for Close column, fall back to Adj Close if needed
     if "Close" not in df.columns:
         if "Adj Close" in df.columns:
             df["Close"] = df["Adj Close"]
@@ -34,7 +49,6 @@ def analyze_ticker(ticker):
             print(f"⚠️ No 'Close' or 'Adj Close' column in {ticker}")
             return
 
-    # Prepare data for Prophet
     df = df.reset_index()[["Date", "Close"]].rename(columns={"Date": "ds", "Close": "y"})
     df["y"] = pd.to_numeric(df["y"], errors="coerce")
     df.dropna(subset=["y"], inplace=True)
@@ -58,18 +72,34 @@ def analyze_ticker(ticker):
 
     latest_price = df['y'].iloc[-1]
 
-    print(f"\n📊 {ticker} Check on {today}")
-    print(f"Current Price: {latest_price:.2f}")
-    print(f"Forecast: {yhat:.2f} (Range {yhat_lower:.2f} ~ {yhat_upper:.2f})")
-
     if latest_price < yhat_lower:
-        print("📉 Alert: Price is BELOW forecast range. Consider BUYING.")
+        alert = "BUY"
     elif latest_price > yhat_upper:
-        print("📈 Alert: Price is ABOVE forecast range. Consider taking profits.")
+        alert = "SELL"
     else:
-        print("✅ Price is within forecast range. No action needed.")
+        alert = "HOLD"
+
+    # Add to results summary
+    results.append({
+        "Ticker": ticker,
+        "Name": name,
+        "Current Price": format_currency(ticker, latest_price),
+        "Forecast (yhat)": format_currency(ticker, yhat),
+        "Lower Bound": format_currency(ticker, yhat_lower),
+        "Upper Bound": format_currency(ticker, yhat_upper),
+        "Alert": alert
+    })
 
 if __name__ == "__main__":
     for ticker in TICKERS:
         analyze_ticker(ticker)
+
+    # Display summary table
+    df_results = pd.DataFrame(results)
+    print("\n📋 Forecast Summary Table:\n")
+    print(df_results.to_string(index=False))
+
+    # Optionally export to CSV
+    # df_results.to_csv("forecast_summary.csv", index=False)
+
     print("\n✅ Forecast analysis complete.")
