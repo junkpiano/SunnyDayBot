@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime
 
 # === Configuration ===
-TICKERS = ["^IXIC", "HDV", "BTC-USD", "SCHD", "VYM", "AAPL", "TSLA", "NVDA"]  # NASDAQ, HDV ETF, and Bitcoin in USD
+TICKERS = ["^IXIC", "JEPI", "JEPQ", "HDV", "BTC-USD", "SCHD", "VYM"]  # NASDAQ, HDV ETF, and Bitcoin in USD
 DAYS_FORWARD = 30
 
 def analyze_ticker(ticker):
