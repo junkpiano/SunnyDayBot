@@ -1,56 +1,129 @@
+# alert_if_out_of_bounds.py (includes BTC + summary table with names and currency symbols)
+
 import yfinance as yf
 from prophet import Prophet
 import pandas as pd
-import matplotlib.pyplot as plt
+from datetime import datetime
+from pathlib import Path
 
-# データ取得
-nasdaq = yf.download("^IXIC", start="2022-01-01", end=None)
+# === Configuration ===
+TICKERS = [
+    "^IXIC", "^GSPC", "VXUS", "JEPI", "JEPQ", "HDV", "SCHD", "VYM",
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "NVDA",
+    "4755.T", "9432.T", "9434.T", "7203.T",
+    "BTC-USD", "GC=F"
+]
+DAYS_FORWARD = 30
 
-# Prophet用形式へ変換
-df = nasdaq.reset_index()[['Date', 'Close']]
-df.columns = ['ds', 'y']
+results = []  # Store summary info here
 
-# Prophetモデル構築・学習
-model = Prophet(daily_seasonality=True)
-model.fit(df)
+def format_currency(ticker, value):
+    if ticker.endswith(".T") or ticker.endswith(".N"):
+        return f"¥{value:,.2f}"
+    else:
+        return f"${value:,.2f}"
 
-# 30日先までの予測
-future = model.make_future_dataframe(periods=30)
-forecast = model.predict(future)
+def analyze_ticker(ticker):
+    print(f"\n▶ Analyzing {ticker}...")
 
-# 予測と実績の分離
-split_date = df['ds'].max()
+    ticker_obj = yf.Ticker(ticker)
+    info = ticker_obj.info
+    name = info.get("shortName") or info.get("longName") or "N/A"
 
-# プロット
-plt.figure(figsize=(14, 6))
+    df = yf.download(ticker, start="2022-01-01", group_by="ticker", auto_adjust=False)
 
-# 実績データ
-plt.plot(df['ds'], df['y'], label='Actual (Historical)', color='black')
+    if df.empty:
+        print(f"⚠️ No data for {ticker}")
+        return
 
-# 予測の中央値（中心値）
-plt.plot(forecast['ds'], forecast['yhat'], label='Forecast (yhat)', color='blue', linestyle='--')
+    if isinstance(df.columns, pd.MultiIndex):
+        try:
+            df = df[ticker].copy()
+        except KeyError:
+            print(f"⚠️ Could not extract sub-DataFrame for {ticker}")
+            return
 
-# 予測区間（95% 信頼区間）
-plt.fill_between(forecast['ds'], forecast['yhat_lower'], forecast['yhat_upper'],
-                 color='skyblue', alpha=0.3, label='95% Confidence Interval')
+    if "Close" not in df.columns:
+        if "Adj Close" in df.columns:
+            df["Close"] = df["Adj Close"]
+        else:
+            print(f"⚠️ No 'Close' or 'Adj Close' column in {ticker}")
+            return
 
-# 予測期間に色をつける（視覚的にわかりやすく）
-plt.axvspan(split_date, forecast['ds'].max(), color='lightgrey', alpha=0.2)
+    df = df.reset_index()[["Date", "Close"]].rename(columns={"Date": "ds", "Close": "y"})
+    df["y"] = pd.to_numeric(df["y"], errors="coerce")
+    df.dropna(subset=["y"], inplace=True)
 
-# 装飾
-plt.title("NASDAQ Forecast (Prophet - Highlighted View)")
-plt.xlabel("Date")
-plt.ylabel("NASDAQ Index Price")
-plt.grid(True)
-plt.legend()
-plt.tight_layout()
-plt.show()
-
-for symbol in ["HDV", "SCHD", "ACWI", "^IXIC"]:
-    data = get_price_data(symbol)
-    model = Prophet()
-    model.fit(data)
+    today = datetime.today().date()
+    model = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+    model.fit(df)
+    future = model.make_future_dataframe(periods=DAYS_FORWARD)
     forecast = model.predict(future)
+    forecast["date_only"] = forecast["ds"].dt.date
 
-    if current_price < forecast["yhat_lower"].iloc[-1]:
-        print(f"📉 {symbol} is below lower band. Consider buying.")
+    today_row = forecast[forecast["date_only"] == today]
+
+    if today_row.empty:
+        print(f"⚠️ No forecast available for {today}")
+        return
+
+    yhat_lower = today_row['yhat_lower'].values[0]
+    yhat_upper = today_row['yhat_upper'].values[0]
+    yhat = today_row['yhat'].values[0]
+
+    latest_price = df['y'].iloc[-1]
+
+    if latest_price < yhat_lower:
+        alert = "BUY"
+    elif latest_price > yhat_upper:
+        alert = "SELL"
+    else:
+        alert = "HOLD"
+
+    # Add to results summary
+    results.append({
+        "Ticker": ticker,
+        "Name": name,
+        "Current Price": format_currency(ticker, latest_price),
+        "Forecast (yhat)": format_currency(ticker, yhat),
+        "Lower Bound": format_currency(ticker, yhat_lower),
+        "Upper Bound": format_currency(ticker, yhat_upper),
+        "Alert": alert
+    })
+
+def write_markdown(df):
+    output_dir = Path("docs")
+    output_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    filename = output_dir / f"forecast_{timestamp}.md"
+
+    with open(filename, "w") as f:
+        f.write(f"# Forecast Report ({timestamp})\n\n")
+        f.write(df.to_markdown(index=False))
+
+    print(f"\n✅ Markdown report written to: {filename}")
+
+    # Append to docs/index.md
+    index_path = output_dir / "index.md"
+    index_path.touch(exist_ok=True)
+    with open(index_path, "a") as index_file:
+        index_file.write(f"- [{timestamp}](./forecast_{timestamp}.md)\n")
+
+    print(f"🔗 Index updated: {index_path}")
+
+if __name__ == "__main__":
+    for ticker in TICKERS:
+        analyze_ticker(ticker)
+
+    # Display summary table
+    df_results = pd.DataFrame(results)
+    print("\n📋 Forecast Summary Table:\n")
+    print(df_results.to_string(index=False))
+
+    write_markdown(df_results)
+
+    # Optionally export to CSV
+    # df_results.to_csv("forecast_summary.csv", index=False)
+
+    print("\n✅ Forecast analysis complete.")
