@@ -10,8 +10,10 @@ from pathlib import Path
 TICKERS = [
     "^IXIC", "^GSPC", "VXUS", "JEPI", "JEPQ", "HDV", "SCHD", "VYM",
     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "NVDA", "TSLA",
-    "4755.T", "9432.T", "9434.T", "7203.T",
-    "BTC-USD", "GC=F"
+    "IBM", "INTC", "AMD", "QCOM", "AVGO", "TXN", "CSCO", "ORCL",
+    "4755.T", "9432.T", "9434.T", "7203.T", "6758.T", "9984.T", "8306.T", "8308.T",
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "SHIB-USD",
+    "GC=F"
 ]
 DAYS_FORWARD = 30
 
