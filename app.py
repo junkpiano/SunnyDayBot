@@ -8,7 +8,7 @@ from pathlib import Path
 
 # === Configuration ===
 TICKERS = [
-    "^IXIC", "^GSPC", "VXUS", "JEPI", "JEPQ", "HDV", "SCHD", "VYM",
+    "^IXIC", "^GSPC", "VXUS", "JEPI", "JEPQ", "HDV", "SCHD", "VYM", "VIG",
     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "NVDA", "TSLA",
     "IBM", "INTC", "AMD", "QCOM", "AVGO", "TXN", "CSCO", "ORCL",
     "4755.T", "9432.T", "9434.T", "7203.T", "6758.T", "9984.T", "8306.T", "8308.T",
