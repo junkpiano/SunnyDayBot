@@ -8,9 +8,10 @@ from pathlib import Path
 
 # === Configuration ===
 TICKERS = [
-    "^IXIC", "^GSPC", "VXUS", "JEPI", "JEPQ", "HDV", "SCHD", "VYM", "VIG",
+    "^IXIC", "^GSPC",
     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "NVDA", "TSLA",
-    "4755.T", "9432.T", "9434.T", "7203.T", "6758.T", "9984.T", "8306.T",
+    "JEPI", "JEPQ", "HDV", "SCHD", "VYM", "VIG",
+    "^N225", "^TOPX",
     "BTC-USD", "ETH-USD", "SOL-USD",
     "GC=F"
 ]
@@ -52,16 +53,54 @@ def analyze_ticker(ticker):
             return
 
     df = df.reset_index()[["Date", "Close"]].rename(columns={"Date": "ds", "Close": "y"})
-    df["y"] = pd.to_numeric(df["y"], errors="coerce")
-    df.dropna(subset=["y"], inplace=True)
+    df["ds"] = pd.to_datetime(df["ds"], errors="coerce")
+    df["y"] = pd.to_numeric(df["y"], errors="coerce")  # Ensure numeric values
 
-    today = datetime.today().date()
-    model = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-    model.fit(df)
+    # Drop rows with invalid or missing data
+    df = df.dropna(subset=["ds", "y"])
+    df = df[df["y"] > 0]
+
+    # Ensure the time series is complete and evenly spaced
+    df = df.set_index("ds").asfreq("D").reset_index()
+    df["y"] = df["y"].interpolate(method="linear")
+
+    if len(df) < 30:
+        print(f"⚠️ Not enough data points for {ticker} (only {len(df)} rows). Skipping...")
+        return
+
+    if df["y"].std() == 0:
+        print(f"⚠️ No variability in data for {ticker}. Skipping...")
+        return
+
+    # Normalize 'y' values if they are too large or too small
+    y_max = df["y"].max()
+    if y_max > 1e6 or y_max < 1e-3:
+        print(f"⚠️ Normalizing 'y' values for {ticker}...")
+        df["y"] = df["y"] / y_max
+
+    # Fit the Prophet model
+    try:
+        model = Prophet(
+            daily_seasonality=False,
+            weekly_seasonality=True,
+            yearly_seasonality=True,
+            seasonality_mode="multiplicative"
+        )
+        model.add_seasonality(name="monthly", period=30.5, fourier_order=3)
+        model.fit(df)
+    except RuntimeWarning as e:
+        print(f"⚠️ Numerical instability detected for {ticker}: {e}")
+        return
+    except Exception as e:
+        print(f"❌ Error fitting Prophet model for {ticker}: {e}")
+        return
+
+    # Generate future predictions
     future = model.make_future_dataframe(periods=DAYS_FORWARD)
     forecast = model.predict(future)
     forecast["date_only"] = forecast["ds"].dt.date
 
+    today = datetime.now().date()
     today_row = forecast[forecast["date_only"] == today]
 
     if today_row.empty:
