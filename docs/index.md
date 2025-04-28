@@ -2,9 +2,9 @@
 
 | Asset     |   ActualPrice |   ForecastMedian |   ForecastUpper |   ForecastLower | Action   |
 |:----------|--------------:|-----------------:|----------------:|----------------:|:---------|
-| NASDAQ    |      17382.9  |         18192.5  |        18840.1  |        17586.4  | BUY      |
-| S&P500    |       5525.21 |          5655.26 |         5796.53 |         5511.22 | BUY      |
-| Nikkei225 |      35869.2  |         36167.9  |        37415.3  |        35022.6  | HOLD     |
+| NASDAQ    |      17382.9  |         18179.1  |        18814.5  |        17534.6  | BUY      |
+| S&P500    |       5525.21 |          5658.31 |         5799.89 |         5519.09 | BUY      |
+| Nikkei225 |      35840    |         36224    |        37469    |        35020    | HOLD     |
 
 ## Forecast Charts
 
@@ -19,3 +19,4 @@
 ### Nikkei225
 
 ![Nikkei225 Forecast](./Nikkei225_forecast.png)
+
