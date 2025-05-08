@@ -35,3 +35,6 @@ jobs:
         with:
           commit_message: "chore: update forecast report"
           file_pattern: docs/*
+          branch: publish 
+          push_options: '--force'
+          create_branch: true
