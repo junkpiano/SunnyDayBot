@@ -12,6 +12,8 @@ import pandas as pd
 from prophet import Prophet
 import matplotlib.pyplot as plt
 
+from curl_cffi import requests
+
 # ---------- configuration ----------
 TICKERS = {
     "^IXIC": "NASDAQ",
@@ -25,7 +27,8 @@ THRESH         = 0.02   # ±2 % band for HOLD
 
 def download_price_series(ticker: str) -> pd.DataFrame:
     """Fetch daily closes, return Prophet-ready DataFrame (columns: ds, y)."""
-    data = yf.download(ticker, period=HISTORY_PERIOD, auto_adjust=False, progress=False)
+    session = requests.Session(impersonate="chrome")
+    data = yf.download(ticker, period=HISTORY_PERIOD, auto_adjust=False, progress=False, session=session)
 
     # Ensure we end up with a clean DataFrame [ds, y]
     if data.empty or "Close" not in data.columns:
