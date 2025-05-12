@@ -1,8 +1,10 @@
 beautifulsoup4==4.13.3
 certifi==2025.1.31
+cffi==1.17.1
 charset-normalizer==3.4.1
 cmdstanpy==1.2.5
 contourpy==1.3.1
+curl-cffi==0.10.0
 cycler==0.12.1
 fonttools==4.57.0
 frozendict==2.4.6
@@ -20,6 +22,7 @@ peewee==3.17.9
 pillow==11.1.0
 platformdirs==4.3.7
 prophet==1.1.6
+pycparser==2.22
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
 pytz==2025.2
