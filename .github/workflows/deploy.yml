@@ -16,7 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -28,9 +29,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run forecast script
-        run: python app.py
-
-      - name: Deploy docs
-        uses: mhausenblas/mkdocs-deploy-gh-pages@master
+        run: |
+          python app.py
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          mkdocs gh-deploy --force --message "Update forecast report"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
