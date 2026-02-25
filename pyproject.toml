@@ -1,16 +1,10 @@
 [project]
-name = "nasdaq-price"
+name = "sunnydaybot"
 version = "0.1.0"
-description = "Add your description here"
+description = "Daily market forecast report (Rust) published via MkDocs"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
-    "curl-cffi>=0.10.0",
-    "matplotlib>=3.10.1",
+    "ghp-import>=2.1.0",
     "mkdocs>=1.6.1",
-    "pandas>=2.2.3",
-    "prophet>=1.1.6",
-    "scikit-learn>=1.6.1",
-    "tabulate>=0.9.0",
-    "yfinance>=0.2.60",
 ]

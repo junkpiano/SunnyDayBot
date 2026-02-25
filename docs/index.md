@@ -1,10 +1,11 @@
 # Forecast Summary
 
-| Asset     |   ActualPrice |   ForecastMedian |   ForecastUpper |   ForecastLower | Action   |
-|:----------|--------------:|-----------------:|----------------:|----------------:|:---------|
-| NASDAQ    |      17844.2  |         18392.4  |        18999.5  |        17690.6  | BUY      |
-| S&P500    |       5650.38 |          5725.11 |         5870.81 |         5586.98 | HOLD     |
-| Nikkei225 |      36830.7  |         36207.6  |        37417    |        34977.5  | HOLD     |
+| Asset | ActualPrice | ForecastMedian | ForecastUpper | ForecastLower | Action |
+| --- | --- | --- | --- | --- | --- |
+| NASDAQ | 22863.68 | 22577.19 | 22941.64 | 22191.71 | HOLD |
+| S&P500 | 6890.07 | 6888.99 | 6972.93 | 6802.74 | HOLD |
+| Nikkei225 | 58583.12 | 61064.60 | 62263.46 | 59979.57 | BUY |
+
 
 ## Forecast Charts
 
