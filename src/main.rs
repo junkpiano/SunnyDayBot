@@ -19,6 +19,8 @@ const TICKERS: &[(&str, &str)] = &[
     ("^IXIC", "NASDAQ"),
     ("^GSPC", "S&P500"),
     ("^N225", "Nikkei225"),
+    ("GC=F", "Gold"),
+    ("BTC-USD", "Bitcoin"),
 ];
 
 #[derive(Clone, Copy)]
