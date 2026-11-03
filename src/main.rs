@@ -3,7 +3,7 @@ use augurs::prophet::wasmstan::WasmstanOptimizer;
 use augurs::prophet::{PredictionData, Prophet, TrainingData};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use plotters::prelude::*;
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 use std::fs;
 use std::path::Path;
 use std::time::Duration as StdDuration;
@@ -13,6 +13,10 @@ const FORECAST_DAYS: usize = 30;
 const TRAIN_DAYS: usize = 180;
 const THRESH: f64 = 0.02;
 const SITE_DIR: &str = "site";
+// Each run reads the published history back from here, adds to it and publishes it again.
+const SITE_URL: &str = "https://junkpiano.github.io/SunnyDayBot/";
+const HISTORY_FILE: &str = "history.json";
+const HISTORY_KEEP: usize = 120;
 const HTTP_RETRIES: usize = 2;
 const HTTP_BACKOFF_SECS: u64 = 2;
 
@@ -119,6 +123,16 @@ struct FundResult {
     estimate: f64,
     high_date: NaiveDate,
     high: f64,
+    accuracy: Accuracy,
+}
+
+/// How past estimates compared with the NAVs that were then published.
+struct Accuracy {
+    count: usize,
+    mae: f64,
+    mape: f64,
+    /// (NAV date, estimate, actual) of the latest checked estimate.
+    last: Option<(NaiveDate, f64, f64)>,
 }
 
 fn main() -> Result<()> {
@@ -160,7 +174,14 @@ fn main() -> Result<()> {
         render_chart(name, &series, &forecast)?;
     }
 
-    let funds = estimate_funds();
+    // Stop rather than publish an empty history over the real one.
+    let mut history = load_history().context("load the published history")?;
+    let funds = estimate_funds(&mut history);
+    fs::write(
+        site_dir.join(HISTORY_FILE),
+        serde_json::to_string(&history).context("serialize history")?,
+    )
+    .context("write history")?;
 
     if results.is_empty() && funds.is_empty() {
         println!("No forecasts were produced (all data unavailable).");
@@ -269,7 +290,7 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
 }
 
 /// Each fund's next NAV estimate; funds whose data is unavailable are left out.
-fn estimate_funds() -> Vec<FundResult> {
+fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
     let fx = match fetch_series(USDJPY) {
         Ok(fx) => fx,
         Err(err) => {
@@ -281,7 +302,13 @@ fn estimate_funds() -> Vec<FundResult> {
     let mut funds = Vec::new();
     for (url, name, ticker) in FUNDS {
         let fund = (|| -> Result<FundResult> {
-            let (date, nav, (high_date, high)) = fetch_nav(url)?;
+            let rows = fetch_nav(url)?;
+            let (date, nav) = *rows.last().unwrap();
+            // The latest of equal highs, so a fund back at its high shows today's date.
+            let (high_date, high) = rows
+                .iter()
+                .copied()
+                .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
             let index = fetch_series(ticker)?;
             // A Tokyo-listed yen ETF is priced at D's own close, with no currency to convert.
             let ratio = if ticker.ends_with(".T") {
@@ -289,13 +316,15 @@ fn estimate_funds() -> Vec<FundResult> {
             } else {
                 change_since(&index, date)? * change_since(&fx, date)?
             };
+            let estimate = nav * ratio;
             Ok(FundResult {
                 name: name.to_string(),
                 date,
                 nav,
-                estimate: nav * ratio,
+                estimate,
                 high_date,
                 high,
+                accuracy: record(history, name, &rows, estimate),
             })
         })();
         match fund {
@@ -306,9 +335,82 @@ fn estimate_funds() -> Vec<FundResult> {
     funds
 }
 
-/// Latest (date, NAV) and the highest (date, NAV) ever from a fund's CSV. Headers may be Shift_JIS;
-/// the data rows are ASCII.
-fn fetch_nav(url: &str) -> Result<(NaiveDate, f64, (NaiveDate, f64))> {
+/// The published history, or an empty one if none has been published yet.
+fn load_history() -> Result<Value> {
+    let url = format!("{}{}", SITE_URL, HISTORY_FILE);
+    let resp = reqwest::blocking::get(&url).with_context(|| format!("fetch {}", url))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(json!({}));
+    }
+    let text = resp.error_for_status()?.text()?;
+    serde_json::from_str(&text).with_context(|| format!("parse {}", url))
+}
+
+/// Records `estimate` as the estimate of the NAV after the latest one in `rows`, fills in the actual
+/// NAV of earlier estimates now that it is published, and scores them. Each run overwrites the
+/// estimate for the same NAV, so the score is of the last run before the NAV came out.
+///
+/// history = {"<fund>": [{"base": "2026-11-02", "estimate": 37306.2, "actual": 37290.0}, ...]}
+fn record(history: &mut Value, fund: &str, rows: &[(NaiveDate, f64)], estimate: f64) -> Accuracy {
+    let base = rows.last().unwrap().0;
+    let map = history.as_object_mut().expect("history is an object");
+    let list = map
+        .entry(fund)
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .expect("history entries are arrays");
+
+    for e in list.iter_mut().filter(|e| e["actual"].is_null()) {
+        let Some(b) = e["base"].as_str().and_then(|b| b.parse::<NaiveDate>().ok()) else {
+            continue;
+        };
+        if let Some(&(_, nav)) = rows.iter().find(|r| r.0 > b) {
+            e["actual"] = json!(nav);
+        }
+    }
+
+    let base_str = base.to_string();
+    match list.iter_mut().find(|e| e["base"] == base_str.as_str()) {
+        Some(e) => e["estimate"] = json!(estimate),
+        None => {
+            let mut e = Map::new();
+            e.insert("base".into(), json!(base_str));
+            e.insert("estimate".into(), json!(estimate));
+            e.insert("actual".into(), Value::Null);
+            list.push(Value::Object(e));
+        }
+    }
+    let excess = list.len().saturating_sub(HISTORY_KEEP);
+    list.drain(..excess);
+
+    score(list)
+}
+
+fn score(list: &[Value]) -> Accuracy {
+    let checked: Vec<(NaiveDate, f64, f64)> = list
+        .iter()
+        .filter_map(|e| {
+            let base = e["base"].as_str()?.parse::<NaiveDate>().ok()?;
+            Some((base, e["estimate"].as_f64()?, e["actual"].as_f64()?))
+        })
+        .collect();
+    let n = checked.len().max(1) as f64;
+    Accuracy {
+        count: checked.len(),
+        mae: checked.iter().map(|c| (c.1 - c.2).abs()).sum::<f64>() / n,
+        mape: checked
+            .iter()
+            .map(|c| ((c.1 - c.2) / c.2).abs())
+            .sum::<f64>()
+            / n
+            * 100.0,
+        last: checked.last().copied(),
+    }
+}
+
+/// Every (date, NAV) row of a fund's CSV, oldest first. Headers may be Shift_JIS; the data rows
+/// are ASCII.
+fn fetch_nav(url: &str) -> Result<Vec<(NaiveDate, f64)>> {
     let bytes = reqwest::blocking::get(url)
         .and_then(|r| r.error_for_status())
         .and_then(|r| r.bytes())
@@ -331,15 +433,10 @@ fn fetch_nav(url: &str) -> Result<(NaiveDate, f64, (NaiveDate, f64))> {
             Some((date, nav))
         })
         .collect();
-    let &(date, nav) = rows
-        .last()
-        .ok_or_else(|| anyhow!("no NAV rows in csv {}", url))?;
-    // The latest of equal highs, so a fund back at its high shows today's date.
-    let high = rows
-        .iter()
-        .copied()
-        .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
-    Ok((date, nav, high))
+    if rows.is_empty() {
+        return Err(anyhow!("no NAV rows in csv {}", url));
+    }
+    Ok(rows)
 }
 
 /// Latest close / last close dated before `nav_date`. A NAV for Japan date D is priced at the
@@ -512,7 +609,7 @@ fn fund_card(f: &FundResult) -> String {
     <div><div class="label">Next estimate</div><div class="num big {cls}">{est}<small>円</small></div></div>
   </div>
   <div class="change {cls}">{change:+.2}%</div>
-  <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%</footer>
+  <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
         name = f.name,
         badge = badge,
@@ -524,7 +621,23 @@ fn fund_card(f: &FundResult) -> String {
         high = fmt_num(f.high, 0),
         high_date = f.high_date,
         drawdown = drawdown,
+        accuracy = accuracy_line(&f.accuracy),
     )
+}
+
+fn accuracy_line(a: &Accuracy) -> String {
+    match a.last {
+        None => "Estimate error: collecting".to_string(),
+        Some((date, est, actual)) => format!(
+            "Estimate error: avg {}円 ({:.2}%) over {} NAVs · after {}: {} vs actual {}",
+            fmt_num(a.mae, 0),
+            a.mape,
+            a.count,
+            date.format("%m/%d"),
+            fmt_num(est, 0),
+            fmt_num(actual, 0),
+        ),
+    }
 }
 
 fn asset_card(r: &AssetResult) -> String {
@@ -680,7 +793,24 @@ fn round2(v: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::fmt_num;
+    use super::{NaiveDate, fmt_num, json, record};
+
+    #[test]
+    fn records_and_scores_estimates() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let mut h = json!({});
+        // Two runs before the 11/04 NAV is out: the later estimate wins.
+        let rows = vec![(d("2026-10-30"), 100.0), (d("2026-11-02"), 101.0)];
+        assert_eq!(record(&mut h, "F", &rows, 102.0).count, 0);
+        record(&mut h, "F", &rows, 103.0);
+        // The 11/04 NAV (101.5) is published; the next run scores the 103.0 estimate.
+        let rows = [rows, vec![(d("2026-11-04"), 101.5)]].concat();
+        let a = record(&mut h, "F", &rows, 101.0);
+        assert_eq!(a.count, 1);
+        assert_eq!(a.mae, 1.5);
+        assert_eq!(a.last, Some((d("2026-11-02"), 103.0, 101.5)));
+        assert_eq!(h["F"].as_array().unwrap().len(), 2);
+    }
 
     #[test]
     fn formats_numbers() {
