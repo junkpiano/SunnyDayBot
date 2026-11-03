@@ -2,8 +2,8 @@ name: Daily Forecast Report
 
 on:
   schedule:
-    - cron: '00 23 * * 0-4'   # 8:00 JST
-    - cron: '00 13 * * 1-5'   # 22:00 JST
+    # Hourly, off the top of the hour, when GitHub's scheduled runs are delayed the most.
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
