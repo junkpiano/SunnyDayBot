@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use augurs::prophet::wasmstan::WasmstanOptimizer;
 use augurs::prophet::{PredictionData, Prophet, TrainingData};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -30,10 +30,25 @@ const RAKUTEN: &str = "https://www.rakuten-toushin.co.jp/assets/csv/chart_";
 // (NAV csv URL prefix, id, name, Yahoo ticker the fund tracks). Both CSVs start with date,NAV.
 // ponytail: distribution funds drop by the payout on their record date; the estimate misses that day.
 const FUNDS: &[(&str, &str, &str, &str)] = &[
-    (MUFG, "253425", "eMAXIS Slim 全世界株式（オール・カントリー）", "ACWI"),
+    (
+        MUFG,
+        "253425",
+        "eMAXIS Slim 全世界株式（オール・カントリー）",
+        "ACWI",
+    ),
     (MUFG, "253266", "eMAXIS Slim 米国株式（S&P500）", "^GSPC"),
-    (RAKUTEN, "100119", "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）", "SCHD"),
-    (RAKUTEN, "100105", "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）", "SCHD"),
+    (
+        RAKUTEN,
+        "100119",
+        "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
+        "SCHD",
+    ),
+    (
+        RAKUTEN,
+        "100105",
+        "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
+        "SCHD",
+    ),
 ];
 const USDJPY: &str = "JPY=X";
 
@@ -132,7 +147,6 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
         encoded
     );
 
-
     let client = reqwest::blocking::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; SunnyDayBot/1.0)")
         .build()
@@ -145,15 +159,12 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
             .send()
             .with_context(|| format!("request yahoo finance for {}", ticker))?;
         let status = response.status();
-        let text = response.text().unwrap_or_else(|_| "<failed to read body>".to_string());
+        let text = response
+            .text()
+            .unwrap_or_else(|_| "<failed to read body>".to_string());
 
         if !status.is_success() {
-            let err = anyhow!(
-                "yahoo finance returned {} for {}: {}",
-                status,
-                ticker,
-                text
-            );
+            let err = anyhow!("yahoo finance returned {} for {}: {}", status, ticker, text);
             if status.as_u16() == 429 && attempt < HTTP_RETRIES {
                 let backoff = HTTP_BACKOFF_SECS * (attempt as u64 + 1);
                 eprintln!(
@@ -170,27 +181,26 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
             return Err(err);
         }
 
-        let resp: Value =
-            serde_json::from_str(&text).context("parse yahoo finance json")?;
+        let resp: Value = serde_json::from_str(&text).context("parse yahoo finance json")?;
 
         let result = resp
-        .get("chart")
-        .and_then(|v| v.get("result"))
-        .and_then(|v| v.get(0))
-        .ok_or_else(|| anyhow!("missing chart result for {}", ticker))?;
+            .get("chart")
+            .and_then(|v| v.get("result"))
+            .and_then(|v| v.get(0))
+            .ok_or_else(|| anyhow!("missing chart result for {}", ticker))?;
 
         let timestamps = result
-        .get("timestamp")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow!("missing timestamps for {}", ticker))?;
+            .get("timestamp")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow!("missing timestamps for {}", ticker))?;
 
         let closes = result
-        .get("indicators")
-        .and_then(|v| v.get("quote"))
-        .and_then(|v| v.get(0))
-        .and_then(|v| v.get("close"))
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow!("missing close data for {}", ticker))?;
+            .get("indicators")
+            .and_then(|v| v.get("quote"))
+            .and_then(|v| v.get(0))
+            .and_then(|v| v.get("close"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow!("missing close data for {}", ticker))?;
 
         let mut series = Vec::new();
         for (ts_value, close_value) in timestamps.iter().zip(closes.iter()) {
@@ -203,11 +213,11 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
                 _ => continue,
             };
 
-        let dt = match DateTime::<Utc>::from_timestamp(ts, 0) {
-            Some(v) => v,
-            None => continue,
-        };
-        let date = dt.date_naive();
+            let dt = match DateTime::<Utc>::from_timestamp(ts, 0) {
+                Some(v) => v,
+                None => continue,
+            };
+            let date = dt.date_naive();
             if date < start {
                 continue;
             }
@@ -270,9 +280,14 @@ fn fetch_nav(url: &str) -> Result<(NaiveDate, f64, (NaiveDate, f64))> {
             Some((date, nav))
         })
         .collect();
-    let &(date, nav) = rows.last().ok_or_else(|| anyhow!("no NAV rows in csv {}", url))?;
+    let &(date, nav) = rows
+        .last()
+        .ok_or_else(|| anyhow!("no NAV rows in csv {}", url))?;
     // The latest of equal highs, so a fund back at its high shows today's date.
-    let high = rows.iter().copied().fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
+    let high = rows
+        .iter()
+        .copied()
+        .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
     Ok((date, nav, high))
 }
 
@@ -297,7 +312,11 @@ fn forecast_series(series: &[SeriesPoint]) -> Result<(Vec<ForecastPoint>, f64)> 
 
     let actual_price = series[len - 1].close;
 
-    let start = if len > TRAIN_DAYS { len - TRAIN_DAYS } else { 0 };
+    let start = if len > TRAIN_DAYS {
+        len - TRAIN_DAYS
+    } else {
+        0
+    };
     let train = &series[start..];
 
     let mut ds: Vec<i64> = Vec::with_capacity(train.len());
@@ -309,7 +328,9 @@ fn forecast_series(series: &[SeriesPoint]) -> Result<(Vec<ForecastPoint>, f64)> 
 
     let data = TrainingData::new(ds, y.clone()).context("create prophet training data")?;
     let mut prophet = Prophet::new(Default::default(), WasmstanOptimizer::new());
-    prophet.fit(data, Default::default()).context("fit prophet model")?;
+    prophet
+        .fit(data, Default::default())
+        .context("fit prophet model")?;
 
     let last_date = series[len - 1].date;
     let mut future_ts: Vec<i64> = Vec::with_capacity(FORECAST_DAYS);
@@ -487,7 +508,9 @@ fn build_html(results: &[AssetResult], funds: &[FundResult]) -> String {
     let updated = (Utc::now() + Duration::hours(9)).format("%Y-%m-%d %H:%M JST");
     let mut body = String::new();
     if !funds.is_empty() {
-        body.push_str(r#"<section><h2>Mutual funds <span>next NAV estimate</span></h2><div class="grid">"#);
+        body.push_str(
+            r#"<section><h2>Mutual funds <span>next NAV estimate</span></h2><div class="grid">"#,
+        );
         for f in funds {
             body.push_str(&fund_card(f));
         }
@@ -522,7 +545,10 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
     };
 
     let mut y_min = series.iter().map(|p| p.close).fold(f64::INFINITY, f64::min);
-    let mut y_max = series.iter().map(|p| p.close).fold(f64::NEG_INFINITY, f64::max);
+    let mut y_max = series
+        .iter()
+        .map(|p| p.close)
+        .fold(f64::NEG_INFINITY, f64::max);
 
     for p in forecast {
         y_min = y_min.min(p.lower);
@@ -544,11 +570,7 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
         .y_label_area_size(60)
         .build_cartesian_2d(start_date..end_date, y_min..y_max)?;
 
-    chart
-        .configure_mesh()
-        .x_labels(8)
-        .y_labels(10)
-        .draw()?;
+    chart.configure_mesh().x_labels(8).y_labels(10).draw()?;
 
     chart
         .draw_series(LineSeries::new(
@@ -556,9 +578,7 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
             &RGBColor(30, 144, 255),
         ))?
         .label("History")
-        .legend(|(x, y)| {
-            PathElement::new(vec![(x, y), (x + 20, y)], &RGBColor(30, 144, 255))
-        });
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RGBColor(30, 144, 255)));
 
     chart
         .draw_series(LineSeries::new(
@@ -566,9 +586,7 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
             &RGBColor(220, 50, 32),
         ))?
         .label("Forecast")
-        .legend(|(x, y)| {
-            PathElement::new(vec![(x, y), (x + 20, y)], &RGBColor(220, 50, 32))
-        });
+        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RGBColor(220, 50, 32)));
 
     chart.draw_series(LineSeries::new(
         forecast.iter().map(|p| (p.date, p.upper)),
@@ -588,9 +606,7 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
                 RGBColor(0, 153, 76).filled(),
             )))?
             .label("Actual")
-            .legend(|(x, y)| {
-                Circle::new((x + 10, y), 5, RGBColor(0, 153, 76).filled())
-            });
+            .legend(|(x, y)| Circle::new((x + 10, y), 5, RGBColor(0, 153, 76).filled()));
     }
 
     chart
