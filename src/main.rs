@@ -23,6 +23,19 @@ const TICKERS: &[(&str, &str)] = &[
     ("BTC-USD", "Bitcoin"),
 ];
 
+const MUFG: &str = "https://www.am.mufg.jp/fund_file/setteirai/";
+const RAKUTEN: &str = "https://www.rakuten-toushin.co.jp/assets/csv/chart_";
+
+// (NAV csv URL prefix, id, name, Yahoo ticker the fund tracks). Both CSVs start with date,NAV.
+// ponytail: distribution funds drop by the payout on their record date; the estimate misses that day.
+const FUNDS: &[(&str, &str, &str, &str)] = &[
+    (MUFG, "253425", "eMAXIS Slim 全世界株式（オール・カントリー）", "ACWI"),
+    (MUFG, "253266", "eMAXIS Slim 米国株式（S&P500）", "^GSPC"),
+    (RAKUTEN, "100119", "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）", "SCHD"),
+    (RAKUTEN, "100105", "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）", "SCHD"),
+];
+const USDJPY: &str = "JPY=X";
+
 #[derive(Clone, Copy)]
 struct SeriesPoint {
     date: NaiveDate,
@@ -87,7 +100,9 @@ fn main() -> Result<()> {
         render_chart(name, &series, &forecast)?;
     }
 
-    if results.is_empty() {
+    let funds = estimate_funds();
+
+    if results.is_empty() && funds.is_empty() {
         println!("No forecasts were produced (all data unavailable).");
         return Ok(());
     }
@@ -98,6 +113,10 @@ fn main() -> Result<()> {
     let mut index = String::new();
     index.push_str("# Forecast Summary\n\n");
     index.push_str(&md);
+    if !funds.is_empty() {
+        index.push_str("\n\n## Next NAV Estimate (Mutual Funds)\n\n");
+        index.push_str(&funds);
+    }
     index.push_str("\n\n## Forecast Charts\n\n");
     for result in &results {
         let image_path = format!("{}_forecast.png", result.name);
@@ -207,6 +226,92 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
     }
 
     Err(last_error.unwrap_or_else(|| anyhow!("request failed for {}", ticker)))
+}
+
+/// Markdown table estimating each fund's next NAV, or "" if nothing could be estimated.
+fn estimate_funds() -> String {
+    let fx = match fetch_series(USDJPY) {
+        Ok(fx) => fx,
+        Err(err) => {
+            eprintln!("Failed to fetch USD/JPY: {:#}", err);
+            return String::new();
+        }
+    };
+
+    let mut md = String::from("| Fund | NAV Date | NAV (JPY) | Next NAV Estimate (JPY) | Change | High Since Inception (JPY) |\n| --- | --- | --- | --- | --- | --- |\n");
+    let mut rows = 0;
+    for (prefix, id, name, ticker) in FUNDS {
+        let row = (|| -> Result<String> {
+            let (date, nav, (high_date, high)) = fetch_nav(&format!("{}{}.csv", prefix, id))?;
+            let index = fetch_series(ticker)?;
+            let ratio = change_since(&index, date)? * change_since(&fx, date)?;
+            let estimate = nav * ratio;
+            let high_cell = format!(
+                "{}{:.0} on {} ({:+.1}%)",
+                if estimate.round() > high {
+                    "🎉 **New high (estimate)** "
+                } else if nav >= high {
+                    "🎉 **High today** "
+                } else {
+                    ""
+                },
+                high,
+                high_date,
+                (nav / high - 1.0) * 100.0
+            );
+            Ok(format!(
+                "| {} | {} | {:.0} | {:.0} | {:+.2}% | {} |\n",
+                name, date, nav, estimate, (ratio - 1.0) * 100.0, high_cell
+            ))
+        })();
+        match row {
+            Ok(row) => {
+                md.push_str(&row);
+                rows += 1;
+            }
+            Err(err) => eprintln!("Failed to estimate {}: {:#}", name, err),
+        }
+    }
+    if rows == 0 {
+        return String::new();
+    }
+    md.push_str("\nEstimate = NAV × index change × USD/JPY change since the closes the NAV was priced at. Not investment advice.\n");
+    md
+}
+
+/// Latest (date, NAV) and the highest (date, NAV) ever from a fund's CSV. Headers may be Shift_JIS;
+/// the data rows are ASCII.
+fn fetch_nav(url: &str) -> Result<(NaiveDate, f64, (NaiveDate, f64))> {
+    let bytes = reqwest::blocking::get(url)
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.bytes())
+        .with_context(|| format!("fetch NAV csv {}", url))?;
+    let rows: Vec<(NaiveDate, f64)> = String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(|line| {
+            let mut cols = line.split(',');
+            let date = NaiveDate::parse_from_str(cols.next()?, "%Y/%m/%d").ok()?;
+            let nav = cols.next()?.parse::<f64>().ok()?;
+            Some((date, nav))
+        })
+        .collect();
+    let &(date, nav) = rows.last().ok_or_else(|| anyhow!("no NAV rows in csv {}", url))?;
+    // The latest of equal highs, so a fund back at its high shows today's date.
+    let high = rows.iter().copied().fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
+    Ok((date, nav, high))
+}
+
+/// Latest close / last close dated before `nav_date`. A NAV for Japan date D is priced at the
+/// foreign closes of the day before D and at D's morning USD/JPY, which is the close before D.
+// ponytail: ignores ETF ex-dividend drops (ACWI, twice a year) and Japan-stock timing; correct for them if the error matters.
+fn change_since(series: &[SeriesPoint], nav_date: NaiveDate) -> Result<f64> {
+    let base = series
+        .iter()
+        .rev()
+        .find(|p| p.date < nav_date)
+        .ok_or_else(|| anyhow!("no close before {}", nav_date))?;
+    let latest = series.last().ok_or_else(|| anyhow!("empty series"))?;
+    Ok(latest.close / base.close)
 }
 
 fn forecast_series(series: &[SeriesPoint]) -> Result<(Vec<ForecastPoint>, f64)> {
