@@ -40,6 +40,21 @@ const FUNDS: &[(&str, &str, &str)] = &[
         "^GSPC",
     ),
     (
+        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000J569&associFundCd=89311199",
+        "SBI・V・S&P500インデックス・ファンド",
+        "^GSPC",
+    ),
+    (
+        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100086.csv",
+        "楽天・プラス・オールカントリー株式インデックス・ファンド",
+        "ACWI",
+    ),
+    (
+        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100087.csv",
+        "楽天・プラス・S&P500インデックス・ファンド",
+        "^GSPC",
+    ),
+    (
         "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
         "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
         "SCHD",
