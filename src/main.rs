@@ -28,74 +28,109 @@ const TICKERS: &[(&str, &str)] = &[
     ("BTC-USD", "Bitcoin"),
 ];
 
-// (NAV csv URL, name, Yahoo ticker the fund tracks). Every CSV starts with date,NAV.
+struct Fund {
+    /// Funds with the same group are shown together, in the order they first appear.
+    group: &'static str,
+    name: &'static str,
+    /// NAV history CSV. Every one starts with date,NAV.
+    url: &'static str,
+    /// Yahoo ticker of what the fund holds.
+    ticker: &'static str,
+    /// Priced at the NAV date's own Tokyo close (a fund holding a Tokyo-listed ETF), so the
+    /// estimate measures `ticker` and USD/JPY from 15:30 JST that day instead of from the close
+    /// before it.
+    tokyo_close: bool,
+}
+
 // am.mufg.jp's own CSV answers 403 to GitHub's runners, so MUFG funds come from the
 // Investment Trusts Association's library (ISIN and association fund code).
 // ponytail: distribution funds drop by the payout on their record date; the estimate misses that day.
-const FUNDS: &[(&str, &str, &str)] = &[
-    (
-        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H1T1&associFundCd=0331418A",
-        "eMAXIS Slim 全世界株式（オール・カントリー）",
-        "ACWI",
-    ),
-    (
-        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GKC6&associFundCd=03311187",
-        "eMAXIS Slim 米国株式（S&P500）",
-        "^GSPC",
-    ),
-    (
-        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000J569&associFundCd=89311199",
-        "SBI・V・S&P500インデックス・ファンド",
-        "^GSPC",
-    ),
-    (
-        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100086.csv",
-        "楽天・プラス・オールカントリー株式インデックス・ファンド",
-        "ACWI",
-    ),
-    (
-        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100087.csv",
-        "楽天・プラス・S&P500インデックス・ファンド",
-        "^GSPC",
-    ),
-    (
-        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLM4&associFundCd=8931A236",
-        "SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）",
-        "IGLN.L",
-    ),
-    (
-        // ponytail: tracks 1540.T, so the 7:00 run (before Tokyo opens) shows no change; estimate
-        // from gold futures × USD/JPY since the Tokyo close if the morning number matters.
-        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
-        "三菱UFJ 純金ファンド",
-        "1540.T",
-    ),
-    (
-        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100123.csv",
-        "楽天・ゴールド・ファンド（為替ヘッジなし）",
-        "GLDM",
-    ),
-    (
-        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RXU8&associFundCd=55311258",
-        "ステート・ストリート・ゴールド・オープン（為替ヘッジなし）",
-        "GLDM",
-    ),
-    (
-        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
-        "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
-        "SCHD",
-    ),
-    (
-        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100105.csv",
-        "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
-        "SCHD",
-    ),
+const FUNDS: &[Fund] = &[
+    Fund {
+        group: "All-Country",
+        name: "eMAXIS Slim 全世界株式（オール・カントリー）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H1T1&associFundCd=0331418A",
+        ticker: "ACWI",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "All-Country",
+        name: "楽天・プラス・オールカントリー株式インデックス・ファンド",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100086.csv",
+        ticker: "ACWI",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "S&P500",
+        name: "eMAXIS Slim 米国株式（S&P500）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GKC6&associFundCd=03311187",
+        ticker: "^GSPC",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "S&P500",
+        name: "SBI・V・S&P500インデックス・ファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000J569&associFundCd=89311199",
+        ticker: "^GSPC",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "S&P500",
+        name: "楽天・プラス・S&P500インデックス・ファンド",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100087.csv",
+        ticker: "^GSPC",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "Gold",
+        name: "SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLM4&associFundCd=8931A236",
+        ticker: "IGLN.L",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "Gold",
+        name: "三菱UFJ 純金ファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
+        ticker: "GC=F",
+        tokyo_close: true,
+    },
+    Fund {
+        group: "Gold",
+        name: "楽天・ゴールド・ファンド（為替ヘッジなし）",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100123.csv",
+        ticker: "GLDM",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "Gold",
+        name: "ステート・ストリート・ゴールド・オープン（為替ヘッジなし）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RXU8&associFundCd=55311258",
+        ticker: "GLDM",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "SCHD",
+        name: "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
+        ticker: "SCHD",
+        tokyo_close: false,
+    },
+    Fund {
+        group: "SCHD",
+        name: "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100105.csv",
+        ticker: "SCHD",
+        tokyo_close: false,
+    },
 ];
 const USDJPY: &str = "JPY=X";
 
 #[derive(Clone, Copy)]
 struct SeriesPoint {
     date: NaiveDate,
+    /// Start of the bar.
+    at: DateTime<Utc>,
     close: f64,
 }
 
@@ -117,6 +152,7 @@ struct AssetResult {
 }
 
 struct FundResult {
+    group: &'static str,
     name: String,
     date: NaiveDate,
     nav: f64,
@@ -196,13 +232,17 @@ fn main() -> Result<()> {
 }
 
 fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
+    fetch_chart(ticker, "1d", "5y")
+}
+
+fn fetch_chart(ticker: &str, interval: &str, range: &str) -> Result<Vec<SeriesPoint>> {
     let now = Utc::now().date_naive();
     let start = now - Duration::days(365 * HISTORY_YEARS);
 
     let encoded = urlencoding::encode(ticker);
     let url = format!(
-        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=5y",
-        encoded
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval={}&range={}",
+        encoded, interval, range
     );
 
     let client = reqwest::blocking::Client::builder()
@@ -280,7 +320,11 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
                 continue;
             }
 
-            series.push(SeriesPoint { date, close });
+            series.push(SeriesPoint {
+                date,
+                at: dt,
+                close,
+            });
         }
 
         return Ok(series);
@@ -300,24 +344,27 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
     };
 
     let mut funds = Vec::new();
-    for (url, name, ticker) in FUNDS {
+    for f in FUNDS {
+        let name = f.name;
         let fund = (|| -> Result<FundResult> {
-            let rows = fetch_nav(url)?;
+            let rows = fetch_nav(f.url)?;
             let (date, nav) = *rows.last().unwrap();
             // The latest of equal highs, so a fund back at its high shows today's date.
             let (high_date, high) = rows
                 .iter()
                 .copied()
                 .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
-            let index = fetch_series(ticker)?;
-            // A Tokyo-listed yen ETF is priced at D's own close, with no currency to convert.
-            let ratio = if ticker.ends_with(".T") {
-                change_since(&index, date + Duration::days(1))?
+            let ratio = if f.tokyo_close {
+                // 15:30 JST. ponytail: hourly bars, so the base is up to an hour after the close.
+                let close = date.and_hms_opt(6, 30, 0).unwrap().and_utc();
+                change_since_time(&fetch_chart(f.ticker, "60m", "1mo")?, close)?
+                    * change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?
             } else {
-                change_since(&index, date)? * change_since(&fx, date)?
+                change_since(&fetch_series(f.ticker)?, date)? * change_since(&fx, date)?
             };
             let estimate = nav * ratio;
             Ok(FundResult {
+                group: f.group,
                 name: name.to_string(),
                 date,
                 nav,
@@ -442,6 +489,17 @@ fn fetch_nav(url: &str) -> Result<Vec<(NaiveDate, f64)>> {
 /// Latest close / last close dated before `nav_date`. A NAV for Japan date D is priced at the
 /// foreign closes of the day before D and at D's morning USD/JPY, which is the close before D.
 // ponytail: ignores ETF ex-dividend drops (ACWI, twice a year) and Japan-stock timing; correct for them if the error matters.
+/// Latest close / close of the last bar that started before `at`.
+fn change_since_time(series: &[SeriesPoint], at: DateTime<Utc>) -> Result<f64> {
+    let base = series
+        .iter()
+        .rev()
+        .find(|p| p.at < at)
+        .ok_or_else(|| anyhow!("no bar before {}", at))?;
+    let latest = series.last().ok_or_else(|| anyhow!("empty series"))?;
+    Ok(latest.close / base.close)
+}
+
 fn change_since(series: &[SeriesPoint], nav_date: NaiveDate) -> Result<f64> {
     let base = series
         .iter()
@@ -671,11 +729,14 @@ fn asset_card(r: &AssetResult) -> String {
 fn build_html(results: &[AssetResult], funds: &[FundResult]) -> String {
     let updated = (Utc::now() + Duration::hours(9)).format("%Y-%m-%d %H:%M JST");
     let mut body = String::new();
-    if !funds.is_empty() {
-        body.push_str(
-            r#"<section><h2>Mutual funds <span>next NAV estimate</span></h2><div class="grid">"#,
-        );
-        for f in funds {
+    let mut groups: Vec<&str> = funds.iter().map(|f| f.group).collect();
+    groups.dedup();
+    for group in groups {
+        body.push_str(&format!(
+            r#"<section><h2>{} <span>next NAV estimate</span></h2><div class="grid">"#,
+            group
+        ));
+        for f in funds.iter().filter(|f| f.group == group) {
             body.push_str(&fund_card(f));
         }
         body.push_str("</div></section>");
