@@ -55,6 +55,28 @@ const FUNDS: &[(&str, &str, &str)] = &[
         "^GSPC",
     ),
     (
+        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLM4&associFundCd=8931A236",
+        "SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）",
+        "IGLN.L",
+    ),
+    (
+        // ponytail: tracks 1540.T, so the 7:00 run (before Tokyo opens) shows no change; estimate
+        // from gold futures × USD/JPY since the Tokyo close if the morning number matters.
+        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
+        "三菱UFJ 純金ファンド",
+        "1540.T",
+    ),
+    (
+        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100123.csv",
+        "楽天・ゴールド・ファンド（為替ヘッジなし）",
+        "GLDM",
+    ),
+    (
+        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RXU8&associFundCd=55311258",
+        "ステート・ストリート・ゴールド・オープン（為替ヘッジなし）",
+        "GLDM",
+    ),
+    (
         "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
         "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
         "SCHD",
@@ -261,7 +283,12 @@ fn estimate_funds() -> Vec<FundResult> {
         let fund = (|| -> Result<FundResult> {
             let (date, nav, (high_date, high)) = fetch_nav(url)?;
             let index = fetch_series(ticker)?;
-            let ratio = change_since(&index, date)? * change_since(&fx, date)?;
+            // A Tokyo-listed yen ETF is priced at D's own close, with no currency to convert.
+            let ratio = if ticker.ends_with(".T") {
+                change_since(&index, date + Duration::days(1))?
+            } else {
+                change_since(&index, date)? * change_since(&fx, date)?
+            };
             Ok(FundResult {
                 name: name.to_string(),
                 date,
