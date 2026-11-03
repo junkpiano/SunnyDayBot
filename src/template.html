@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SunnyDay Bot</title>
+<meta name="description" content="Daily market forecasts and next NAV estimates for mutual funds.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☀️</text></svg>">
+<style>
+:root {
+  --bg: #f6f7f9; --card: #fff; --text: #14171c; --muted: #6b7280; --line: #e5e7eb;
+  --up: #15803d; --down: #dc2626; --accent: #f59e0b;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d1117; --card: #161b22; --text: #e6edf3; --muted: #8b949e; --line: #30363d;
+          --up: #3fb950; --down: #f85149; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-feature-settings: "tnum";
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.top h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+.top h1 span { color: var(--accent); }
+.top time { color: var(--muted); font-size: 13px; }
+h2 { font-size: 18px; margin: 32px 0 12px; }
+h2 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.card h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.row { display: flex; align-items: flex-end; gap: 10px; margin-top: 6px; }
+.arrow { color: var(--muted); padding-bottom: 4px; }
+.label { color: var(--muted); font-size: 12px; }
+.num { font-size: 20px; font-weight: 600; }
+.num.big { font-size: 28px; }
+.num small { font-size: 13px; margin-left: 2px; font-weight: 400; }
+.change { font-weight: 600; }
+.up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--muted); }
+.card footer { color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+.badge { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+.badge.buy { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+.badge.sell { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+.badge.hold { background: var(--line); color: var(--muted); }
+.badge.high { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+.card img { width: 100%; height: auto; border-radius: 8px; background: #fff; margin-top: 6px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1><span>☀</span> SunnyDay Bot</h1>
+    <time>Updated {{updated}}</time>
+  </div>
+  {{body}}
+  <p class="note">
+    Next NAV estimate = latest NAV × change of the tracked index × change of USD/JPY since the closes that NAV was priced at.
+    Market forecasts come from a Prophet model; BUY/SELL/HOLD compares the current price with the forecast.
+    Mechanically computed figures for reference only. Not investment advice.
+  </p>
+</div>
+</body>
+</html>

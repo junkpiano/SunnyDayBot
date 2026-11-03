@@ -12,6 +12,7 @@ const HISTORY_YEARS: i64 = 5;
 const FORECAST_DAYS: usize = 30;
 const TRAIN_DAYS: usize = 180;
 const THRESH: f64 = 0.02;
+const SITE_DIR: &str = "site";
 const HTTP_RETRIES: usize = 2;
 const HTTP_BACKOFF_SECS: u64 = 2;
 
@@ -59,11 +60,18 @@ struct AssetResult {
     action: String,
 }
 
+struct FundResult {
+    name: String,
+    date: NaiveDate,
+    nav: f64,
+    estimate: f64,
+    high_date: NaiveDate,
+    high: f64,
+}
+
 fn main() -> Result<()> {
-    let docs_dir = Path::new("docs");
-    if !docs_dir.exists() {
-        fs::create_dir_all(docs_dir).context("create docs directory")?;
-    }
+    let site_dir = Path::new(SITE_DIR);
+    fs::create_dir_all(site_dir).context("create site directory")?;
 
     let mut results: Vec<AssetResult> = Vec::new();
 
@@ -107,24 +115,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let md = build_markdown(&results);
-    println!("\n{}\n", md);
-
-    let mut index = String::new();
-    index.push_str("# Forecast Summary\n\n");
-    index.push_str(&md);
-    if !funds.is_empty() {
-        index.push_str("\n\n## Next NAV Estimate (Mutual Funds)\n\n");
-        index.push_str(&funds);
-    }
-    index.push_str("\n\n## Forecast Charts\n\n");
-    for result in &results {
-        let image_path = format!("{}_forecast.png", result.name);
-        index.push_str(&format!("### {}\n\n", result.name));
-        index.push_str(&format!("![{} Forecast](./{})\n\n", result.name, image_path));
-    }
-
-    fs::write(docs_dir.join("index.md"), index).context("write docs/index.md")?;
+    fs::write(site_dir.join("index.html"), build_html(&results, &funds))
+        .context("write site/index.html")?;
+    println!("Wrote {}/index.html", SITE_DIR);
 
     Ok(())
 }
@@ -228,55 +221,37 @@ fn fetch_series(ticker: &str) -> Result<Vec<SeriesPoint>> {
     Err(last_error.unwrap_or_else(|| anyhow!("request failed for {}", ticker)))
 }
 
-/// Markdown table estimating each fund's next NAV, or "" if nothing could be estimated.
-fn estimate_funds() -> String {
+/// Each fund's next NAV estimate; funds whose data is unavailable are left out.
+fn estimate_funds() -> Vec<FundResult> {
     let fx = match fetch_series(USDJPY) {
         Ok(fx) => fx,
         Err(err) => {
             eprintln!("Failed to fetch USD/JPY: {:#}", err);
-            return String::new();
+            return Vec::new();
         }
     };
 
-    let mut md = String::from("| Fund | NAV Date | NAV (JPY) | Next NAV Estimate (JPY) | Change | High Since Inception (JPY) |\n| --- | --- | --- | --- | --- | --- |\n");
-    let mut rows = 0;
+    let mut funds = Vec::new();
     for (prefix, id, name, ticker) in FUNDS {
-        let row = (|| -> Result<String> {
+        let fund = (|| -> Result<FundResult> {
             let (date, nav, (high_date, high)) = fetch_nav(&format!("{}{}.csv", prefix, id))?;
             let index = fetch_series(ticker)?;
             let ratio = change_since(&index, date)? * change_since(&fx, date)?;
-            let estimate = nav * ratio;
-            let high_cell = format!(
-                "{}{:.0} on {} ({:+.1}%)",
-                if estimate.round() > high {
-                    "🎉 **New high (estimate)** "
-                } else if nav >= high {
-                    "🎉 **High today** "
-                } else {
-                    ""
-                },
-                high,
+            Ok(FundResult {
+                name: name.to_string(),
+                date,
+                nav,
+                estimate: nav * ratio,
                 high_date,
-                (nav / high - 1.0) * 100.0
-            );
-            Ok(format!(
-                "| {} | {} | {:.0} | {:.0} | {:+.2}% | {} |\n",
-                name, date, nav, estimate, (ratio - 1.0) * 100.0, high_cell
-            ))
+                high,
+            })
         })();
-        match row {
-            Ok(row) => {
-                md.push_str(&row);
-                rows += 1;
-            }
+        match fund {
+            Ok(fund) => funds.push(fund),
             Err(err) => eprintln!("Failed to estimate {}: {:#}", name, err),
         }
     }
-    if rows == 0 {
-        return String::new();
-    }
-    md.push_str("\nEstimate = NAV × index change × USD/JPY change since the closes the NAV was priced at. Not investment advice.\n");
-    md
+    funds
 }
 
 /// Latest (date, NAV) and the highest (date, NAV) ever from a fund's CSV. Headers may be Shift_JIS;
@@ -415,20 +390,125 @@ fn classify(actual: f64, median: f64) -> &'static str {
     "HOLD"
 }
 
-fn build_markdown(results: &[AssetResult]) -> String {
-    let mut md = String::new();
-    md.push_str("| Asset | ActualPrice | ForecastMedian | ForecastUpper | ForecastLower | Action |\n");
-    md.push_str("| --- | --- | --- | --- | --- | --- |\n");
-
-    for r in results {
-        md.push_str(&format!(
-            "| {} | {:.2} | {:.2} | {:.2} | {:.2} | {} |\n",
-            r.name, r.actual, r.median, r.upper, r.lower, r.action
-        ));
+/// 1234567.891 -> "1,234,567.89" with `decimals` digits after the point.
+fn fmt_num(v: f64, decimals: usize) -> String {
+    let s = format!("{:.*}", decimals, v.abs());
+    let (int, frac) = s.split_once('.').map_or((s.as_str(), ""), |(i, f)| (i, f));
+    let mut out = String::new();
+    for (i, c) in int.chars().enumerate() {
+        if i > 0 && (int.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
     }
-
-    md
+    if !frac.is_empty() {
+        out.push('.');
+        out.push_str(frac);
+    }
+    if v < 0.0 && out.chars().any(|c| c != '0' && c != '.' && c != ',') {
+        out.insert(0, '-');
+    }
+    out
 }
+
+fn pct_class(pct: f64) -> &'static str {
+    if pct > 0.0 {
+        "up"
+    } else if pct < 0.0 {
+        "down"
+    } else {
+        "flat"
+    }
+}
+
+fn fund_card(f: &FundResult) -> String {
+    let change = (f.estimate / f.nav - 1.0) * 100.0;
+    let drawdown = (f.nav / f.high - 1.0) * 100.0;
+    let badge = if f.estimate.round() > f.high {
+        r#"<span class="badge high">🎉 New high (estimate)</span>"#
+    } else if f.nav >= f.high {
+        r#"<span class="badge high">🎉 High today</span>"#
+    } else {
+        ""
+    };
+    format!(
+        r#"<article class="card">
+  <header><h3>{name}</h3>{badge}</header>
+  <div class="row">
+    <div><div class="label">NAV {date}</div><div class="num">{nav}<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">Next estimate</div><div class="num big {cls}">{est}<small>円</small></div></div>
+  </div>
+  <div class="change {cls}">{change:+.2}%</div>
+  <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%</footer>
+</article>"#,
+        name = f.name,
+        badge = badge,
+        date = f.date.format("%m/%d"),
+        nav = fmt_num(f.nav, 0),
+        est = fmt_num(f.estimate, 0),
+        cls = pct_class(change),
+        change = change,
+        high = fmt_num(f.high, 0),
+        high_date = f.high_date,
+        drawdown = drawdown,
+    )
+}
+
+fn asset_card(r: &AssetResult) -> String {
+    let change = (r.median / r.actual - 1.0) * 100.0;
+    format!(
+        r#"<article class="card">
+  <header><h3>{name}</h3><span class="badge {action_cls}">{action}</span></header>
+  <div class="row">
+    <div><div class="label">Now</div><div class="num">{actual}</div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">{days}-day forecast</div><div class="num big {cls}">{median}</div></div>
+  </div>
+  <div class="change {cls}">{change:+.2}%</div>
+  <footer>Range {lower} – {upper}</footer>
+  <img src="{img}" alt="{name} forecast chart" loading="lazy">
+</article>"#,
+        name = r.name,
+        action_cls = r.action.to_lowercase(),
+        action = r.action,
+        actual = fmt_num(r.actual, 2),
+        days = FORECAST_DAYS,
+        median = fmt_num(r.median, 2),
+        cls = pct_class(change),
+        change = change,
+        lower = fmt_num(r.lower, 2),
+        upper = fmt_num(r.upper, 2),
+        img = urlencoding::encode(&chart_file(&r.name)),
+    )
+}
+
+fn build_html(results: &[AssetResult], funds: &[FundResult]) -> String {
+    let updated = (Utc::now() + Duration::hours(9)).format("%Y-%m-%d %H:%M JST");
+    let mut body = String::new();
+    if !funds.is_empty() {
+        body.push_str(r#"<section><h2>Mutual funds <span>next NAV estimate</span></h2><div class="grid">"#);
+        for f in funds {
+            body.push_str(&fund_card(f));
+        }
+        body.push_str("</div></section>");
+    }
+    if !results.is_empty() {
+        body.push_str(&format!(
+            r#"<section><h2>Markets <span>{}-day forecast</span></h2><div class="grid">"#,
+            FORECAST_DAYS
+        ));
+        for r in results {
+            body.push_str(&asset_card(r));
+        }
+        body.push_str("</div></section>");
+    }
+    TEMPLATE
+        .replace("{{updated}}", &updated.to_string())
+        .replace("{{body}}", &body)
+}
+
+const TEMPLATE: &str = include_str!("template.html");
 
 fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) -> Result<()> {
     if series.is_empty() {
@@ -453,7 +533,7 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
     y_min -= padding;
     y_max += padding;
 
-    let filename = format!("docs/{}_forecast.png", name);
+    let filename = format!("{}/{}", SITE_DIR, chart_file(name));
     let root = BitMapBackend::new(&filename, (1280, 720)).into_drawing_area();
     root.fill(&WHITE)?;
 
@@ -523,6 +603,24 @@ fn render_chart(name: &str, series: &[SeriesPoint], forecast: &[ForecastPoint]) 
     Ok(())
 }
 
+fn chart_file(name: &str) -> String {
+    format!("{}_forecast.png", name)
+}
+
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_num;
+
+    #[test]
+    fn formats_numbers() {
+        assert_eq!(fmt_num(37188.0, 0), "37,188");
+        assert_eq!(fmt_num(1234567.891, 2), "1,234,567.89");
+        assert_eq!(fmt_num(999.0, 0), "999");
+        assert_eq!(fmt_num(-1234.5, 1), "-1,234.5");
+        assert_eq!(fmt_num(-0.001, 2), "0.00");
+    }
 }
