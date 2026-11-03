@@ -24,28 +24,28 @@ const TICKERS: &[(&str, &str)] = &[
     ("BTC-USD", "Bitcoin"),
 ];
 
-const MUFG: &str = "https://www.am.mufg.jp/fund_file/setteirai/";
-const RAKUTEN: &str = "https://www.rakuten-toushin.co.jp/assets/csv/chart_";
-
-// (NAV csv URL prefix, id, name, Yahoo ticker the fund tracks). Both CSVs start with date,NAV.
+// (NAV csv URL, name, Yahoo ticker the fund tracks). Every CSV starts with date,NAV.
+// am.mufg.jp's own CSV answers 403 to GitHub's runners, so MUFG funds come from the
+// Investment Trusts Association's library (ISIN and association fund code).
 // ponytail: distribution funds drop by the payout on their record date; the estimate misses that day.
-const FUNDS: &[(&str, &str, &str, &str)] = &[
+const FUNDS: &[(&str, &str, &str)] = &[
     (
-        MUFG,
-        "253425",
+        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H1T1&associFundCd=0331418A",
         "eMAXIS Slim 全世界株式（オール・カントリー）",
         "ACWI",
     ),
-    (MUFG, "253266", "eMAXIS Slim 米国株式（S&P500）", "^GSPC"),
     (
-        RAKUTEN,
-        "100119",
+        "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GKC6&associFundCd=03311187",
+        "eMAXIS Slim 米国株式（S&P500）",
+        "^GSPC",
+    ),
+    (
+        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
         "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
         "SCHD",
     ),
     (
-        RAKUTEN,
-        "100105",
+        "https://www.rakuten-toushin.co.jp/assets/csv/chart_100105.csv",
         "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
         "SCHD",
     ),
@@ -242,9 +242,9 @@ fn estimate_funds() -> Vec<FundResult> {
     };
 
     let mut funds = Vec::new();
-    for (prefix, id, name, ticker) in FUNDS {
+    for (url, name, ticker) in FUNDS {
         let fund = (|| -> Result<FundResult> {
-            let (date, nav, (high_date, high)) = fetch_nav(&format!("{}{}.csv", prefix, id))?;
+            let (date, nav, (high_date, high)) = fetch_nav(url)?;
             let index = fetch_series(ticker)?;
             let ratio = change_since(&index, date)? * change_since(&fx, date)?;
             Ok(FundResult {
@@ -275,7 +275,16 @@ fn fetch_nav(url: &str) -> Result<(NaiveDate, f64, (NaiveDate, f64))> {
         .lines()
         .filter_map(|line| {
             let mut cols = line.split(',');
-            let date = NaiveDate::parse_from_str(cols.next()?, "%Y/%m/%d").ok()?;
+            // "2026/11/02" or "2026年11月02日" (Shift_JIS, so the kanji are mangled here).
+            let mut ymd = cols
+                .next()?
+                .split(|c: char| !c.is_ascii_digit())
+                .filter(|p| !p.is_empty());
+            let date = NaiveDate::from_ymd_opt(
+                ymd.next()?.parse().ok()?,
+                ymd.next()?.parse().ok()?,
+                ymd.next()?.parse().ok()?,
+            )?;
             let nav = cols.next()?.parse::<f64>().ok()?;
             Some((date, nav))
         })
