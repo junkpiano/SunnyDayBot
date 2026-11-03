@@ -2,7 +2,7 @@ name: Daily Forecast Report
 
 on:
   schedule:
-    - cron: '0 22,4,10 * * *'   # 7:00, 13:00 and 19:00 JST
+    - cron: '17 22,4,10 * * *'  # 7:17, 13:17 and 19:17 JST; GitHub most often drops runs at minute 0
   workflow_dispatch:
   pull_request:
 
