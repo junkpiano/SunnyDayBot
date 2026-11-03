@@ -23,7 +23,7 @@ Artifacts:
 - `site/*_forecast.png`
 
 ## Deploy
-The GitHub Actions workflow at `.github/workflows/deploy.yml` runs hourly and on manual dispatch:
+The GitHub Actions workflow at `.github/workflows/deploy.yml` runs at 7:00, 13:00 and 19:00 JST and on manual dispatch:
 - Builds and runs the Rust forecast. Pull requests also run the tests, and do not deploy.
 - Deploys `site/` with `actions/deploy-pages`. In the repository settings, Pages must use "GitHub Actions" as its source.
 
