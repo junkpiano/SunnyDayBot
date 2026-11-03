@@ -24,7 +24,7 @@ Artifacts:
 
 ## Deploy
 The GitHub Actions workflow at `.github/workflows/deploy.yml` runs hourly and on manual dispatch:
-- Tests, builds and runs the Rust forecast.
+- Builds and runs the Rust forecast. Pull requests also run the tests, and do not deploy.
 - Deploys `site/` with `actions/deploy-pages`. In the repository settings, Pages must use "GitHub Actions" as its source.
 
 ## Configuration
