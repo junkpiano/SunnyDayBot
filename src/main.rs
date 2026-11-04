@@ -325,6 +325,8 @@ const FUNDS: &[Fund] = &[
     },
 ];
 const USDJPY: &str = "JPY=X";
+/// MUFG's daily rate page; a day not archived yet redirects to the current page.
+const TTM_URL: &str = "https://www.murc-kawasesouba.jp/fx/past/index.php?id=";
 
 #[derive(Clone, Copy)]
 struct SeriesPoint {
@@ -555,6 +557,17 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
         }
     };
 
+    // Today's TTM once it is out, the live rate before that.
+    let fx_now = match usd_ttm(target) {
+        Ok(Some(ttm)) => ttm,
+        Ok(None) => fx.last().map_or(f64::NAN, |p| p.close),
+        Err(err) => {
+            eprintln!("Failed to fetch today's TTM: {:#}", err);
+            fx.last().map_or(f64::NAN, |p| p.close)
+        }
+    };
+    let mut ttms: HashMap<NaiveDate, Option<f64>> = HashMap::new();
+
     // Many funds share an index; fetch each once.
     let mut cache: HashMap<&str, Vec<SeriesPoint>> = HashMap::new();
     let mut funds = Vec::new();
@@ -606,7 +619,17 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                     ratio += weight * (change_between(series, date, target)? - 1.0);
                 }
                 if !f.hedged {
-                    ratio *= change_since(&fx, date)?;
+                    // The NAV was converted at that day's TTM.
+                    let base = *ttms.entry(date).or_insert_with(|| {
+                        usd_ttm(date)
+                            .inspect_err(|e| eprintln!("Failed to fetch TTM for {}: {:#}", date, e))
+                            .ok()
+                            .flatten()
+                    });
+                    ratio *= match base {
+                        Some(base) => fx_now / base,
+                        None => change_since(&fx, date)?,
+                    };
                 }
                 ratio
             };
@@ -723,6 +746,28 @@ fn score(list: &[Value]) -> Accuracy {
             * 100.0,
         last: checked.last().copied(),
     }
+}
+
+/// The USD TTM (midpoint of TTS and TTB) MUFG published for `date`; None until it is out.
+/// Funds convert their NAV at this rate, set around 10:00 JST.
+fn usd_ttm(date: NaiveDate) -> Result<Option<f64>> {
+    let url = format!("{}{}", TTM_URL, date.format("%y%m%d"));
+    let bytes = reqwest::blocking::get(&url)
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.bytes())
+        .with_context(|| format!("fetch TTM {}", url))?;
+    Ok(parse_ttm(&String::from_utf8_lossy(&bytes), date))
+}
+
+fn parse_ttm(html: &str, date: NaiveDate) -> Option<f64> {
+    if !html.contains(&date.format("As of %B %-d, %Y").to_string()) {
+        return None;
+    }
+    let row = &html[html.find(">USD</td>")?..];
+    let mut nums = row
+        .split(|c: char| c == '>' || c == '<')
+        .filter_map(|t| t.trim().parse::<f64>().ok());
+    Some((nums.next()? + nums.next()?) / 2.0)
 }
 
 /// Every (date, NAV) row of a fund's CSV, oldest first. Headers may be Shift_JIS; the data rows
@@ -1182,7 +1227,8 @@ fn round2(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, json, nav_target, record,
+        DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, json, nav_target,
+        parse_ttm, record,
     };
 
     #[test]
@@ -1256,6 +1302,17 @@ mod tests {
         ];
         let r = change_between(&series, d("2026-11-02"), d("2026-11-04")).unwrap();
         assert_eq!(r, 1.02);
+    }
+
+    #[test]
+    fn parses_ttm() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let html = r#"<h2>2026年11月4日現在　As of November 4, 2026</h2>
+            <tr><td>Euro</td></tr>
+            <tr><td>US Dollar</td><td class="t_center">USD</td>
+            <td class="t_right">159.59 </td><td class="t_right">157.59 </td></tr>"#;
+        assert!((parse_ttm(html, d("2026-11-04")).unwrap() - 158.59).abs() < 1e-9);
+        assert_eq!(parse_ttm(html, d("2026-11-05")), None);
     }
 
     #[test]
