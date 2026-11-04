@@ -396,7 +396,13 @@ fn main() -> Result<()> {
             continue;
         }
 
-        let (forecast, actual_price) = forecast_series(&series)?;
+        let (forecast, actual_price) = match forecast_series(&series) {
+            Ok(fit) => fit,
+            Err(err) => {
+                eprintln!("Failed to forecast {}: {:#}", name, err);
+                continue;
+            }
+        };
         let last_forecast = forecast
             .last()
             .ok_or_else(|| anyhow!("forecast empty for {}", name))?;
