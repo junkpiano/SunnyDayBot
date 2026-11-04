@@ -3,7 +3,7 @@ use augurs::prophet::wasmstan::WasmstanOptimizer;
 use augurs::prophet::{PredictionData, Prophet, TrainingData};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use plotters::prelude::*;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 use std::time::Duration as StdDuration;
@@ -36,10 +36,10 @@ struct Fund {
     url: &'static str,
     /// Yahoo ticker of what the fund holds.
     ticker: &'static str,
-    /// Priced at the NAV date's own Tokyo close (a fund holding a Tokyo-listed ETF), so the
-    /// estimate measures `ticker` and USD/JPY from 15:30 JST that day instead of from the close
-    /// before it.
-    tokyo_close: bool,
+    /// The Tokyo-listed ETF the fund holds, for a fund priced at the NAV date's own Tokyo close.
+    /// Once the ETF has traded after the NAV date, the estimate follows it; before that, it
+    /// measures `ticker` and USD/JPY from 15:30 JST on the NAV date.
+    tokyo_etf: Option<&'static str>,
 }
 
 // am.mufg.jp's own CSV answers 403 to GitHub's runners, so MUFG funds come from the
@@ -51,77 +51,77 @@ const FUNDS: &[Fund] = &[
         name: "eMAXIS Slim 全世界株式（オール・カントリー）",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H1T1&associFundCd=0331418A",
         ticker: "ACWI",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "All-Country",
         name: "楽天・プラス・オールカントリー株式インデックス・ファンド",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100086.csv",
         ticker: "ACWI",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "S&P500",
         name: "eMAXIS Slim 米国株式（S&P500）",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GKC6&associFundCd=03311187",
         ticker: "^GSPC",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "S&P500",
         name: "SBI・V・S&P500インデックス・ファンド",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000J569&associFundCd=89311199",
         ticker: "^GSPC",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "S&P500",
         name: "楽天・プラス・S&P500インデックス・ファンド",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100087.csv",
         ticker: "^GSPC",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "Gold",
         name: "SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLM4&associFundCd=8931A236",
         ticker: "IGLN.L",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "Gold",
         name: "三菱UFJ 純金ファンド",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
         ticker: "GC=F",
-        tokyo_close: true,
+        tokyo_etf: Some("1540.T"),
     },
     Fund {
         group: "Gold",
         name: "楽天・ゴールド・ファンド（為替ヘッジなし）",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100123.csv",
         ticker: "GLDM",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "Gold",
         name: "ステート・ストリート・ゴールド・オープン（為替ヘッジなし）",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RXU8&associFundCd=55311258",
         ticker: "GLDM",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "SCHD",
         name: "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
         ticker: "SCHD",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
     Fund {
         group: "SCHD",
         name: "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100105.csv",
         ticker: "SCHD",
-        tokyo_close: false,
+        tokyo_etf: None,
     },
 ];
 const USDJPY: &str = "JPY=X";
@@ -354,11 +354,18 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 .iter()
                 .copied()
                 .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
-            let ratio = if f.tokyo_close {
-                // 15:30 JST. ponytail: hourly bars, so the base is up to an hour after the close.
-                let close = date.and_hms_opt(6, 30, 0).unwrap().and_utc();
-                change_since_time(&fetch_chart(f.ticker, "60m", "1mo")?, close)?
-                    * change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?
+            let ratio = if let Some(etf) = f.tokyo_etf {
+                let etf = fetch_series(etf)?;
+                if etf.last().is_some_and(|p| p.date > date) {
+                    // Change since the ETF's close on the NAV date.
+                    change_since(&etf, date.succ_opt().unwrap())?
+                } else {
+                    // Tokyo hasn't traded since. 15:30 JST. ponytail: hourly bars, so the base
+                    // is up to an hour after the close.
+                    let close = date.and_hms_opt(6, 30, 0).unwrap().and_utc();
+                    change_since_time(&fetch_chart(f.ticker, "60m", "1mo")?, close)?
+                        * change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?
+                }
             } else {
                 change_since(&fetch_series(f.ticker)?, date)? * change_since(&fx, date)?
             };
