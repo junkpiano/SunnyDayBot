@@ -156,6 +156,8 @@ struct FundResult {
     name: String,
     date: NaiveDate,
     nav: f64,
+    /// The NAV before `nav`.
+    prev: (NaiveDate, f64),
     /// The NAV date estimated: today in Japan, or the next weekday on a weekend.
     target: NaiveDate,
     /// None once the `target` NAV is published: the one after it needs closes that haven't happened.
@@ -353,6 +355,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
         let fund = (|| -> Result<FundResult> {
             let rows = fetch_nav(f.url)?;
             let (date, nav) = *rows.last().unwrap();
+            let prev = rows[rows.len().saturating_sub(2)];
             // The latest of equal highs, so a fund back at its high shows today's date.
             let (high_date, high) = rows
                 .iter()
@@ -364,6 +367,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                     name: name.to_string(),
                     date,
                     nav,
+                    prev,
                     target,
                     estimate: None,
                     high_date,
@@ -393,6 +397,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 name: name.to_string(),
                 date,
                 nav,
+                prev,
                 target,
                 estimate,
                 high_date,
@@ -719,6 +724,8 @@ fn pct_class(pct: f64) -> &'static str {
 fn fund_card(f: &FundResult) -> String {
     let drawdown = (f.nav / f.high - 1.0) * 100.0;
     let Some(estimate) = f.estimate else {
+        let diff = f.nav - f.prev.1;
+        let change = (f.nav / f.prev.1 - 1.0) * 100.0;
         let badge = if f.nav >= f.high {
             r#"<span class="badge high">🎉 High today</span>"#
         } else {
@@ -728,14 +735,19 @@ fn fund_card(f: &FundResult) -> String {
             r#"<article class="card">
   <header><h3>{name}</h3>{badge}</header>
   <div class="row">
-    <div><div class="label">NAV {date}</div><div class="num big">{nav}<small>円</small></div></div>
+    <div><div class="label">NAV {date}</div><div class="num big {cls}">{nav}<small>円</small></div></div>
   </div>
+  <div class="change {cls}">{diff}円 ({change:+.2}%) vs {prev_date}</div>
   <div class="label">Published. The next estimate comes with the 7:17 update.</div>
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
             name = f.name,
             date = f.date.format("%m/%d"),
             nav = fmt_num(f.nav, 0),
+            cls = pct_class(change),
+            diff = format!("{}{}", if diff > 0.0 { "+" } else { "" }, fmt_num(diff, 0)),
+            change = change,
+            prev_date = f.prev.0.format("%m/%d"),
             high = fmt_num(f.high, 0),
             high_date = f.high_date,
             accuracy = accuracy_line(&f.accuracy),
