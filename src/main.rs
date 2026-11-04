@@ -4,6 +4,7 @@ use augurs::prophet::{PredictionData, Prophet, TrainingData};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use plotters::prelude::*;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::Duration as StdDuration;
@@ -34,11 +35,15 @@ struct Fund {
     name: &'static str,
     /// NAV history CSV. Every one starts with date,NAV.
     url: &'static str,
-    /// Yahoo ticker of what the fund holds.
-    ticker: &'static str,
+    /// What the fund holds, as (Yahoo ticker, weight): its change is the weighted sum of theirs.
+    /// A weight of 2 is a 2x leveraged fund; two legs of 1 are a 100% + 100% fund.
+    /// ponytail: leveraged funds reset daily, so across a holiday the estimate drifts a little.
+    legs: &'static [(&'static str, f64)],
+    /// Hedged to yen: USD/JPY doesn't move the NAV. ponytail: the hedge cost is ignored.
+    hedged: bool,
     /// The Tokyo-listed ETF the fund holds, for a fund priced at the NAV date's own Tokyo close.
     /// Once the ETF has traded after the NAV date, the estimate follows it; before that, it
-    /// measures `ticker` and USD/JPY from 15:30 JST on the NAV date.
+    /// measures the first leg and USD/JPY from 15:30 JST on the NAV date.
     tokyo_etf: Option<&'static str>,
 }
 
@@ -47,80 +52,275 @@ struct Fund {
 // ponytail: distribution funds drop by the payout on their record date; the estimate misses that day.
 const FUNDS: &[Fund] = &[
     Fund {
-        group: "All-Country",
+        group: "MSCI",
         name: "eMAXIS Slim 全世界株式（オール・カントリー）",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H1T1&associFundCd=0331418A",
-        ticker: "ACWI",
+        legs: &[("ACWI", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
-        group: "All-Country",
+        group: "MSCI",
         name: "楽天・プラス・オールカントリー株式インデックス・ファンド",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100086.csv",
-        ticker: "ACWI",
+        legs: &[("ACWI", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "MSCI",
+        name: "eMAXIS Slim 全世界株式（除く日本）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000G631&associFundCd=03316183",
+        legs: &[("ACWI", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "MSCI",
+        name: "eMAXIS Slim 先進国株式インデックス",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000ENC5&associFundCd=03319172",
+        legs: &[("KOKU", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
         group: "S&P500",
         name: "eMAXIS Slim 米国株式（S&P500）",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GKC6&associFundCd=03311187",
-        ticker: "^GSPC",
+        legs: &[("^GSPC", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
         group: "S&P500",
         name: "SBI・V・S&P500インデックス・ファンド",
         url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000J569&associFundCd=89311199",
-        ticker: "^GSPC",
+        legs: &[("^GSPC", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
         group: "S&P500",
         name: "楽天・プラス・S&P500インデックス・ファンド",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100087.csv",
-        ticker: "^GSPC",
+        legs: &[("^GSPC", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
-        group: "Gold",
-        name: "SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLM4&associFundCd=8931A236",
-        ticker: "IGLN.L",
+        group: "S&P500",
+        name: "iFreeレバレッジ S&P500",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GUL6&associFundCd=04315188",
+        legs: &[("^GSPC", 2.0)],
+        hedged: true,
         tokyo_etf: None,
     },
     Fund {
-        group: "Gold",
-        name: "三菱UFJ 純金ファンド",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
-        ticker: "GC=F",
-        tokyo_etf: Some("1540.T"),
-    },
-    Fund {
-        group: "Gold",
-        name: "楽天・ゴールド・ファンド（為替ヘッジなし）",
-        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100123.csv",
-        ticker: "GLDM",
+        group: "NASDAQ100",
+        name: "ニッセイNASDAQ100インデックスファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PDY6&associFundCd=29313233",
+        legs: &[("^NDX", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
-        group: "Gold",
-        name: "ステート・ストリート・ゴールド・オープン（為替ヘッジなし）",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RXU8&associFundCd=55311258",
-        ticker: "GLDM",
+        group: "NASDAQ100",
+        name: "楽天・プラス・NASDAQ-100インデックス・ファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000QF22&associFundCd=9I314241",
+        legs: &[("^NDX", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "NASDAQ100",
+        name: "SBI NASDAQ100インデックス・ファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000SWF9&associFundCd=89311265",
+        legs: &[("^NDX", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "NASDAQ100",
+        name: "iFreeレバレッジ NASDAQ100",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H0S5&associFundCd=0431218A",
+        legs: &[("^NDX", 2.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "NASDAQ100",
+        name: "楽天レバレッジNASDAQ-100",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000MLM1&associFundCd=9I31121B",
+        legs: &[("^NDX", 2.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "NASDAQ100",
+        name: "auAMレバレッジNASDAQ100為替ヘッジ無し",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000QZ77&associFundCd=AY311247",
+        legs: &[("^NDX", 2.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "NASDAQ100",
+        name: "NASDAQ100 3倍ブル",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000KW84&associFundCd=0431720A",
+        legs: &[("^NDX", 3.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "NASDAQ100",
+        name: "auAMトリプル・NASDAQ100為替ヘッジ無し",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000T9H5&associFundCd=AY31226A",
+        legs: &[("^NDX", 3.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "FANG+",
+        name: "iFreeNEXT FANG+インデックス",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000FZD4&associFundCd=04311181",
+        legs: &[("^NYFANG", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "FANG+",
+        name: "iFreeレバレッジ FANG+",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000KLQ6&associFundCd=04314208",
+        legs: &[("^NYFANG", 2.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "SOX",
+        name: "ニッセイSOX指数インデックスファンド（米国半導体株）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PDZ3&associFundCd=29314233",
+        legs: &[("^SOX", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "SOX",
+        name: "楽天・プラス・SOXインデックス・ファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000QF30&associFundCd=9I315241",
+        legs: &[("^SOX", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
         group: "SCHD",
         name: "楽天・シュワブ・高配当株式・米国ファンド（資産成長型）",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100119.csv",
-        ticker: "SCHD",
+        legs: &[("SCHD", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
     Fund {
         group: "SCHD",
         name: "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
         url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100105.csv",
-        ticker: "SCHD",
+        legs: &[("SCHD", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "SCHD",
+        name: "SBI・S・米国高配当株式ファンド（年4回決算型）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000REE2&associFundCd=8931224C",
+        legs: &[("SCHD", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "三菱UFJ 純金ファンド",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
+        legs: &[("GC=F", 1.0)],
+        hedged: false,
+        tokyo_etf: Some("1540.T"),
+    },
+    Fund {
+        group: "Gold",
+        name: "楽天・ゴールド・ファンド（為替ヘッジなし）",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100123.csv",
+        legs: &[("GLDM", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "楽天・ゴールド・ファンド（為替ヘッジあり）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000SGP1&associFundCd=9I311261",
+        legs: &[("GLDM", 1.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLM4&associFundCd=8931A236",
+        legs: &[("IGLN.L", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "SBI・iシェアーズ・ゴールドファンド（為替ヘッジあり）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000PLL6&associFundCd=89319236",
+        legs: &[("IGLN.L", 1.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "ステート・ストリート・ゴールド・オープン（為替ヘッジなし）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RXU8&associFundCd=55311258",
+        legs: &[("GLDM", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "アモーヴァ ゴールド・ファンド（為替ヘッジなし）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000F6M7&associFundCd=02312177",
+        legs: &[("GLDM", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold",
+        name: "アモーヴァ ゴールド・ファンド（為替ヘッジあり）",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000F6L9&associFundCd=02311177",
+        legs: &[("GLDM", 1.0)],
+        hedged: true,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold Plus",
+        name: "Tracers MSCIオール・カントリー・ゴールドプラス",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000SNW3&associFundCd=02311263",
+        legs: &[("ACWI", 1.0), ("GC=F", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold Plus",
+        name: "Tracers S&P500ゴールドプラス",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000NS46&associFundCd=02315228",
+        legs: &[("^GSPC", 1.0), ("GC=F", 1.0)],
+        hedged: false,
+        tokyo_etf: None,
+    },
+    Fund {
+        group: "Gold Plus",
+        name: "Tracers NASDAQ100ゴールドプラス",
+        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000RH60&associFundCd=02311251",
+        legs: &[("^NDX", 1.0), ("GC=F", 1.0)],
+        hedged: false,
         tokyo_etf: None,
     },
 ];
@@ -349,6 +549,8 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
         }
     };
 
+    // Many funds share an index; fetch each once.
+    let mut cache: HashMap<&str, Vec<SeriesPoint>> = HashMap::new();
     let mut funds = Vec::new();
     for f in FUNDS {
         let name = f.name;
@@ -384,12 +586,23 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                     // Tokyo hasn't traded since. 15:30 JST. ponytail: hourly bars, so the base
                     // is up to an hour after the close.
                     let close = date.and_hms_opt(6, 30, 0).unwrap().and_utc();
-                    change_since_time(&fetch_chart(f.ticker, "60m", "1mo")?, close)?
+                    change_since_time(&fetch_chart(f.legs[0].0, "60m", "1mo")?, close)?
                         * change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?
                 }
             } else {
                 // Closes before the target date: later ones belong to the NAV after it.
-                change_between(&fetch_series(f.ticker)?, date, target)? * change_since(&fx, date)?
+                let mut ratio = 1.0;
+                for &(ticker, weight) in f.legs {
+                    let series = match cache.get(ticker) {
+                        Some(series) => series,
+                        None => cache.entry(ticker).or_insert(fetch_series(ticker)?),
+                    };
+                    ratio += weight * (change_between(series, date, target)? - 1.0);
+                }
+                if !f.hedged {
+                    ratio *= change_since(&fx, date)?;
+                }
+                ratio
             };
             let estimate = Some(nav * ratio);
             Ok(FundResult {
@@ -756,11 +969,14 @@ fn fund_card(f: &FundResult) -> String {
     let target = format!("{} NAV estimate", f.target.format("%m/%d"));
     let change = (estimate / f.nav - 1.0) * 100.0;
     let badge = if estimate.round() > f.high {
-        r#"<span class="badge high">🎉 New high (estimate)</span>"#
+        r#"<span class="badge high">🎉 New high (estimate)</span>"#.to_string()
     } else if f.nav >= f.high {
-        r#"<span class="badge high">🎉 High today</span>"#
+        format!(
+            r#"<span class="badge high">🎉 High on {}</span>"#,
+            f.date.format("%m/%d")
+        )
     } else {
-        ""
+        String::new()
     };
     format!(
         r#"<article class="card">
