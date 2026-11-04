@@ -126,7 +126,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "NASDAQ100",
         name: "楽天・プラス・NASDAQ-100インデックス・ファンド",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000QF22&associFundCd=9I314241",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100091.csv",
         legs: &[("^NDX", 1.0)],
         hedged: false,
         tokyo_etf: None,
@@ -150,7 +150,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "NASDAQ100",
         name: "楽天レバレッジNASDAQ-100",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000MLM1&associFundCd=9I31121B",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100071.csv",
         legs: &[("^NDX", 2.0)],
         hedged: true,
         tokyo_etf: None,
@@ -206,7 +206,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "SOX",
         name: "楽天・プラス・SOXインデックス・ファンド",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000QF30&associFundCd=9I315241",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100092.csv",
         legs: &[("^SOX", 1.0)],
         hedged: false,
         tokyo_etf: None,
@@ -254,7 +254,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "Gold",
         name: "楽天・ゴールド・ファンド（為替ヘッジあり）",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000SGP1&associFundCd=9I311261",
+        url: "https://www.rakuten-toushin.co.jp/assets/csv/chart_100122.csv",
         legs: &[("GLDM", 1.0)],
         hedged: true,
         tokyo_etf: None,
