@@ -674,7 +674,14 @@ fn pct_class(pct: f64) -> &'static str {
     }
 }
 
-fn fund_card(f: &FundResult) -> String {
+/// `latest` is the newest NAV date of any fund: a fund still on an older NAV has its `latest` NAV
+/// priced but not published yet, so that is the one estimated.
+fn fund_card(f: &FundResult, latest: NaiveDate) -> String {
+    let target = if f.date < latest {
+        format!("{} NAV estimate", latest.format("%m/%d"))
+    } else {
+        "Next NAV estimate".to_string()
+    };
     let change = (f.estimate / f.nav - 1.0) * 100.0;
     let drawdown = (f.nav / f.high - 1.0) * 100.0;
     let badge = if f.estimate.round() > f.high {
@@ -690,12 +697,13 @@ fn fund_card(f: &FundResult) -> String {
   <div class="row">
     <div><div class="label">NAV {date}</div><div class="num">{nav}<small>円</small></div></div>
     <div class="arrow">→</div>
-    <div><div class="label">Next estimate</div><div class="num big {cls}">{est}<small>円</small></div></div>
+    <div><div class="label">{target}</div><div class="num big {cls}">{est}<small>円</small></div></div>
   </div>
   <div class="change {cls}">{change:+.2}%</div>
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
         name = f.name,
+        target = target,
         badge = badge,
         date = f.date.format("%m/%d"),
         nav = fmt_num(f.nav, 0),
@@ -755,15 +763,16 @@ fn asset_card(r: &AssetResult) -> String {
 fn build_html(results: &[AssetResult], funds: &[FundResult]) -> String {
     let updated = (Utc::now() + Duration::hours(9)).format("%Y-%m-%d %H:%M JST");
     let mut body = String::new();
+    let latest = funds.iter().map(|f| f.date).max().unwrap_or_default();
     let mut groups: Vec<&str> = funds.iter().map(|f| f.group).collect();
     groups.dedup();
     for group in groups {
         body.push_str(&format!(
-            r#"<section><h2>{} <span>next NAV estimate</span></h2><div class="grid">"#,
+            r#"<section><h2>{} <span>NAV estimates</span></h2><div class="grid">"#,
             group
         ));
         for f in funds.iter().filter(|f| f.group == group) {
-            body.push_str(&fund_card(f));
+            body.push_str(&fund_card(f, latest));
         }
         body.push_str("</div></section>");
     }
