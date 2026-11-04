@@ -47,14 +47,14 @@ struct Fund {
     tokyo_etf: Option<&'static str>,
 }
 
-// am.mufg.jp's own CSV answers 403 to GitHub's runners, so MUFG funds come from the
-// Investment Trusts Association's library (ISIN and association fund code).
+// NAVs come from the fund company's own CSV where it has one (out by the evening), otherwise from
+// the Investment Trusts Association's library (ISIN and association fund code; out late at night).
 // ponytail: distribution funds drop by the payout on their record date; the estimate misses that day.
 const FUNDS: &[Fund] = &[
     Fund {
         group: "MSCI",
         name: "eMAXIS Slim 全世界株式（オール・カントリー）",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000H1T1&associFundCd=0331418A",
+        url: "https://www.am.mufg.jp/fund_file/setteirai/253425.csv",
         legs: &[("ACWI", 1.0)],
         hedged: false,
         tokyo_etf: None,
@@ -70,7 +70,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "MSCI",
         name: "eMAXIS Slim 全世界株式（除く日本）",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000G631&associFundCd=03316183",
+        url: "https://www.am.mufg.jp/fund_file/setteirai/253209.csv",
         legs: &[("ACWI", 1.0)],
         hedged: false,
         tokyo_etf: None,
@@ -78,7 +78,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "MSCI",
         name: "eMAXIS Slim 先進国株式インデックス",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000ENC5&associFundCd=03319172",
+        url: "https://www.am.mufg.jp/fund_file/setteirai/252653.csv",
         legs: &[("KOKU", 1.0)],
         hedged: false,
         tokyo_etf: None,
@@ -86,7 +86,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "S&P500",
         name: "eMAXIS Slim 米国株式（S&P500）",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C000GKC6&associFundCd=03311187",
+        url: "https://www.am.mufg.jp/fund_file/setteirai/253266.csv",
         legs: &[("^GSPC", 1.0)],
         hedged: false,
         tokyo_etf: None,
@@ -238,7 +238,7 @@ const FUNDS: &[Fund] = &[
     Fund {
         group: "Gold",
         name: "三菱UFJ 純金ファンド",
-        url: "https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=JP90C0007G10&associFundCd=03311112",
+        url: "https://www.am.mufg.jp/fund_file/setteirai/251065.csv",
         legs: &[("GC=F", 1.0)],
         hedged: false,
         tokyo_etf: Some("1540.T"),
