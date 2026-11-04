@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use augurs::prophet::wasmstan::WasmstanOptimizer;
 use augurs::prophet::{PredictionData, Prophet, TrainingData};
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use plotters::prelude::*;
 use serde_json::{Value, json};
 use std::fs;
@@ -156,7 +156,10 @@ struct FundResult {
     name: String,
     date: NaiveDate,
     nav: f64,
-    estimate: f64,
+    /// The NAV date estimated: today in Japan, or the next weekday on a weekend.
+    target: NaiveDate,
+    /// None once the `target` NAV is published: the one after it needs closes that haven't happened.
+    estimate: Option<f64>,
     high_date: NaiveDate,
     high: f64,
     accuracy: Accuracy,
@@ -333,8 +336,9 @@ fn fetch_chart(ticker: &str, interval: &str, range: &str) -> Result<Vec<SeriesPo
     Err(last_error.unwrap_or_else(|| anyhow!("request failed for {}", ticker)))
 }
 
-/// Each fund's next NAV estimate; funds whose data is unavailable are left out.
+/// Each fund's estimate of today's NAV; funds whose data is unavailable are left out.
 fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
+    let target = nav_target(Utc::now());
     let fx = match fetch_series(USDJPY) {
         Ok(fx) => fx,
         Err(err) => {
@@ -354,6 +358,19 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 .iter()
                 .copied()
                 .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
+            if date >= target {
+                return Ok(FundResult {
+                    group: f.group,
+                    name: name.to_string(),
+                    date,
+                    nav,
+                    target,
+                    estimate: None,
+                    high_date,
+                    high,
+                    accuracy: record(history, name, &rows, None, Utc::now()),
+                });
+            }
             let ratio = if let Some(etf) = f.tokyo_etf {
                 let etf = fetch_series(etf)?;
                 if etf.last().is_some_and(|p| p.date > date) {
@@ -367,14 +384,16 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                         * change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?
                 }
             } else {
-                change_since(&fetch_series(f.ticker)?, date)? * change_since(&fx, date)?
+                // Closes before the target date: later ones belong to the NAV after it.
+                change_between(&fetch_series(f.ticker)?, date, target)? * change_since(&fx, date)?
             };
-            let estimate = nav * ratio;
+            let estimate = Some(nav * ratio);
             Ok(FundResult {
                 group: f.group,
                 name: name.to_string(),
                 date,
                 nav,
+                target,
                 estimate,
                 high_date,
                 high,
@@ -412,7 +431,7 @@ fn record(
     history: &mut Value,
     fund: &str,
     rows: &[(NaiveDate, f64)],
-    estimate: f64,
+    estimate: Option<f64>,
     now: DateTime<Utc>,
 ) -> Accuracy {
     let base = rows.last().unwrap().0;
@@ -445,12 +464,13 @@ fn record(
         e.as_object_mut().unwrap().remove("runs");
     }
 
-    let base_str = base.to_string();
-    let run = json!([now.to_rfc3339(), estimate]);
-    match list.iter_mut().find(|e| e["base"] == base_str.as_str()) {
-        Some(e) => e["runs"].as_array_mut().unwrap().push(run),
-        None => {
-            list.push(json!({"base": base_str, "runs": [run], "estimate": null, "actual": null}))
+    if let Some(estimate) = estimate {
+        let base_str = base.to_string();
+        let run = json!([now.to_rfc3339(), estimate]);
+        match list.iter_mut().find(|e| e["base"] == base_str.as_str()) {
+            Some(e) => e["runs"].as_array_mut().unwrap().push(run),
+            None => list
+                .push(json!({"base": base_str, "runs": [run], "estimate": null, "actual": null})),
         }
     }
     let excess = list.len().saturating_sub(HISTORY_KEEP);
@@ -524,6 +544,28 @@ fn change_since_time(series: &[SeriesPoint], at: DateTime<Utc>) -> Result<f64> {
         .ok_or_else(|| anyhow!("no bar before {}", at))?;
     let latest = series.last().ok_or_else(|| anyhow!("empty series"))?;
     Ok(latest.close / base.close)
+}
+
+/// Today's date in Japan, or the next weekday on a weekend. ponytail: Japanese holidays aren't
+/// known, so on one the label says that day while the estimate is for the next business day.
+fn nav_target(now: DateTime<Utc>) -> NaiveDate {
+    let mut d = (now + Duration::hours(9)).date_naive();
+    while d.weekday().number_from_monday() > 5 {
+        d = d.succ_opt().unwrap();
+    }
+    d
+}
+
+/// Change from the last close before `nav_date` to the last close before `target`.
+fn change_between(series: &[SeriesPoint], nav_date: NaiveDate, target: NaiveDate) -> Result<f64> {
+    let before = |d: NaiveDate| {
+        series
+            .iter()
+            .rev()
+            .find(|p| p.date < d)
+            .ok_or_else(|| anyhow!("no close before {}", d))
+    };
+    Ok(before(target)?.close / before(nav_date)?.close)
 }
 
 fn change_since(series: &[SeriesPoint], nav_date: NaiveDate) -> Result<f64> {
@@ -674,17 +716,34 @@ fn pct_class(pct: f64) -> &'static str {
     }
 }
 
-/// `latest` is the newest NAV date of any fund: a fund still on an older NAV has its `latest` NAV
-/// priced but not published yet, so that is the one estimated.
-fn fund_card(f: &FundResult, latest: NaiveDate) -> String {
-    let target = if f.date < latest {
-        format!("{} NAV estimate", latest.format("%m/%d"))
-    } else {
-        "Next NAV estimate".to_string()
-    };
-    let change = (f.estimate / f.nav - 1.0) * 100.0;
+fn fund_card(f: &FundResult) -> String {
     let drawdown = (f.nav / f.high - 1.0) * 100.0;
-    let badge = if f.estimate.round() > f.high {
+    let Some(estimate) = f.estimate else {
+        let badge = if f.nav >= f.high {
+            r#"<span class="badge high">🎉 High today</span>"#
+        } else {
+            ""
+        };
+        return format!(
+            r#"<article class="card">
+  <header><h3>{name}</h3>{badge}</header>
+  <div class="row">
+    <div><div class="label">NAV {date}</div><div class="num big">{nav}<small>円</small></div></div>
+  </div>
+  <div class="label">Published. The next estimate comes with the 7:17 update.</div>
+  <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
+</article>"#,
+            name = f.name,
+            date = f.date.format("%m/%d"),
+            nav = fmt_num(f.nav, 0),
+            high = fmt_num(f.high, 0),
+            high_date = f.high_date,
+            accuracy = accuracy_line(&f.accuracy),
+        );
+    };
+    let target = format!("{} NAV estimate", f.target.format("%m/%d"));
+    let change = (estimate / f.nav - 1.0) * 100.0;
+    let badge = if estimate.round() > f.high {
         r#"<span class="badge high">🎉 New high (estimate)</span>"#
     } else if f.nav >= f.high {
         r#"<span class="badge high">🎉 High today</span>"#
@@ -707,7 +766,7 @@ fn fund_card(f: &FundResult, latest: NaiveDate) -> String {
         badge = badge,
         date = f.date.format("%m/%d"),
         nav = fmt_num(f.nav, 0),
-        est = fmt_num(f.estimate, 0),
+        est = fmt_num(estimate, 0),
         cls = pct_class(change),
         change = change,
         high = fmt_num(f.high, 0),
@@ -763,16 +822,15 @@ fn asset_card(r: &AssetResult) -> String {
 fn build_html(results: &[AssetResult], funds: &[FundResult]) -> String {
     let updated = (Utc::now() + Duration::hours(9)).format("%Y-%m-%d %H:%M JST");
     let mut body = String::new();
-    let latest = funds.iter().map(|f| f.date).max().unwrap_or_default();
     let mut groups: Vec<&str> = funds.iter().map(|f| f.group).collect();
     groups.dedup();
     for group in groups {
         body.push_str(&format!(
-            r#"<section><h2>{} <span>NAV estimates</span></h2><div class="grid">"#,
+            r#"<section><h2>{} <span>today's NAV estimates</span></h2><div class="grid">"#,
             group
         ));
         for f in funds.iter().filter(|f| f.group == group) {
-            body.push_str(&fund_card(f, latest));
+            body.push_str(&fund_card(f));
         }
         body.push_str("</div></section>");
     }
@@ -889,7 +947,9 @@ fn round2(v: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{DateTime, NaiveDate, Utc, fmt_num, json, record};
+    use super::{
+        DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, json, nav_target, record,
+    };
 
     #[test]
     fn records_and_scores_estimates() {
@@ -899,16 +959,16 @@ mod tests {
         // 11/03 is a holiday. Runs on 11/03 evening and 11/04 morning, noon and evening.
         let rows = vec![(d("2026-10-30"), 100.0), (d("2026-11-02"), 101.0)];
         assert_eq!(
-            record(&mut h, "F", &rows, 102.0, t("2026-11-03T10:17:00Z")).count,
+            record(&mut h, "F", &rows, Some(102.0), t("2026-11-03T10:17:00Z")).count,
             0
         );
-        record(&mut h, "F", &rows, 103.0, t("2026-11-03T22:17:00Z"));
-        record(&mut h, "F", &rows, 104.0, t("2026-11-04T04:17:00Z"));
+        record(&mut h, "F", &rows, Some(103.0), t("2026-11-03T22:17:00Z"));
+        record(&mut h, "F", &rows, Some(104.0), t("2026-11-04T04:17:00Z"));
         // After 15:30 JST: the 11/04 NAV is already priced, so this run must not be scored.
-        record(&mut h, "F", &rows, 109.0, t("2026-11-04T10:17:00Z"));
+        record(&mut h, "F", &rows, Some(109.0), t("2026-11-04T10:17:00Z"));
         // The 11/04 NAV (103.5) is out; the noon run's 104.0 is scored.
         let rows = [rows, vec![(d("2026-11-04"), 103.5)]].concat();
-        let a = record(&mut h, "F", &rows, 110.0, t("2026-11-04T10:53:00Z"));
+        let a = record(&mut h, "F", &rows, Some(110.0), t("2026-11-04T10:53:00Z"));
         assert_eq!(a.count, 1);
         assert_eq!(a.mae, 0.5);
         assert_eq!(a.last, Some((d("2026-11-02"), 104.0, 103.5)));
@@ -928,11 +988,40 @@ mod tests {
             &mut h,
             "F",
             &rows,
-            104.0,
+            Some(104.0),
             "2026-11-04T10:53:00Z".parse().unwrap(),
         );
         assert_eq!(a.count, 1);
         assert_eq!(h["F"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn targets_todays_nav() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
+        // Wed 07:17 JST is still Tue in UTC; Sat and Sun target Monday.
+        assert_eq!(nav_target(t("2026-11-03T22:17:00Z")), d("2026-11-04"));
+        assert_eq!(nav_target(t("2026-11-07T01:00:00Z")), d("2026-11-09"));
+        assert_eq!(nav_target(t("2026-11-08T22:17:00Z")), d("2026-11-09"));
+    }
+
+    #[test]
+    fn ignores_closes_after_the_target() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let p = |s: &str, close| SeriesPoint {
+            date: d(s),
+            at: Utc::now(),
+            close,
+        };
+        // NAV 11/02 is priced at the 10/30 close, the 11/04 NAV at the 11/03 close; 11/04 is later.
+        let series = [
+            p("2026-10-30", 100.0),
+            p("2026-11-02", 101.0),
+            p("2026-11-03", 102.0),
+            p("2026-11-04", 110.0),
+        ];
+        let r = change_between(&series, d("2026-11-02"), d("2026-11-04")).unwrap();
+        assert_eq!(r, 1.02);
     }
 
     #[test]
