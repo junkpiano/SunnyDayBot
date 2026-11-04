@@ -51,6 +51,7 @@ h2 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6
 .badge.hold { background: var(--line); color: var(--muted); }
 .badge.high { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
 .card img { width: 100%; height: auto; border-radius: 8px; background: #fff; margin-top: 6px; }
+.star { background: none; border: 0; padding: 0 6px 0 0; font-size: 17px; line-height: 1; cursor: pointer; color: var(--accent); }
 .note { color: var(--muted); font-size: 12px; margin-top: 40px; }
 </style>
 </head>
@@ -60,6 +61,7 @@ h2 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6
     <h1><span>☀</span> SunnyDay Bot</h1>
     <time>Updated {{updated}}</time>
   </div>
+  <section id="favorites" hidden><h2>★ Favorites <span>saved in this browser</span></h2><div class="grid"></div></section>
   {{body}}
   <p class="note">
     Next NAV estimate = latest NAV × change of the tracked index × change of USD/JPY since the closes that NAV was priced at.
@@ -67,5 +69,39 @@ h2 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6
     Mechanically computed figures for reference only. Not investment advice.
   </p>
 </div>
+<script>
+// Favorites live in this browser's localStorage, keyed by card title.
+const KEY = 'favorites';
+const favs = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
+const fav = document.getElementById('favorites');
+const cards = [...document.querySelectorAll('section .card')];
+for (const card of cards) {
+  const h = card.querySelector('h3');
+  const b = document.createElement('button');
+  b.className = 'star';
+  b.dataset.name = h.textContent;
+  h.prepend(b);
+}
+function render() {
+  const picked = cards.filter(c => favs.has(c.querySelector('.star').dataset.name));
+  fav.querySelector('.grid').replaceChildren(...picked.map(c => c.cloneNode(true)));
+  fav.hidden = !picked.length;
+  for (const b of document.querySelectorAll('.star')) {
+    const on = favs.has(b.dataset.name);
+    b.textContent = on ? '★' : '☆';
+    b.title = on ? 'Remove from favorites' : 'Add to favorites';
+    b.setAttribute('aria-pressed', on);
+  }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.star');
+  if (!b) return;
+  const n = b.dataset.name;
+  favs.has(n) ? favs.delete(n) : favs.add(n);
+  localStorage.setItem(KEY, JSON.stringify([...favs]));
+  render();
+});
+render();
+</script>
 </body>
 </html>
