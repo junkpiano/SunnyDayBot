@@ -1,0 +1,35 @@
+name: Build
+
+# Runs the unit tests and, on main, builds an arm64 binary as a run artifact.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build
+        if: github.event_name == 'push'
+        run: cargo build --release
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push'
+        with:
+          name: sunnydaybot-aarch64
+          path: target/release/sunnydaybot
+          retention-days: 90
