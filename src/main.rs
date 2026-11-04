@@ -371,7 +371,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 estimate,
                 high_date,
                 high,
-                accuracy: record(history, name, &rows, estimate),
+                accuracy: record(history, name, &rows, estimate, Utc::now()),
             })
         })();
         match fund {
@@ -393,12 +393,21 @@ fn load_history() -> Result<Value> {
     serde_json::from_str(&text).with_context(|| format!("parse {}", url))
 }
 
-/// Records `estimate` as the estimate of the NAV after the latest one in `rows`, fills in the actual
-/// NAV of earlier estimates now that it is published, and scores them. Each run overwrites the
-/// estimate for the same NAV, so the score is of the last run before the NAV came out.
+/// Records this run's `estimate` of the NAV after the latest one in `rows`, and scores past
+/// estimates whose NAV is now published. A NAV dated D is priced at closes up to 15:30 JST on D,
+/// so a run after that no longer estimates it: the score uses the last run before D 15:30 JST.
+/// D is only known once the NAV is out (holidays), so each run's estimate is kept until then.
 ///
-/// history = {"<fund>": [{"base": "2026-11-02", "estimate": 37306.2, "actual": 37290.0}, ...]}
-fn record(history: &mut Value, fund: &str, rows: &[(NaiveDate, f64)], estimate: f64) -> Accuracy {
+/// history = {"<fund>": [{"base": "2026-11-02", "runs": [["2026-11-03T22:17:00Z", 37306.2], ...],
+///                        "estimate": null, "actual": null}, ...]}
+/// Once the NAV is out, "runs" is replaced by the chosen "estimate" and the "actual" NAV.
+fn record(
+    history: &mut Value,
+    fund: &str,
+    rows: &[(NaiveDate, f64)],
+    estimate: f64,
+    now: DateTime<Utc>,
+) -> Accuracy {
     let base = rows.last().unwrap().0;
     let map = history.as_object_mut().expect("history is an object");
     let list = map
@@ -406,25 +415,35 @@ fn record(history: &mut Value, fund: &str, rows: &[(NaiveDate, f64)], estimate: 
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .expect("history entries are arrays");
+    // Entries without "runs" still pending were recorded before this format and may hold an
+    // estimate made after the NAV was priced; drop them.
+    list.retain(|e| !e["actual"].is_null() || e["runs"].is_array());
 
     for e in list.iter_mut().filter(|e| e["actual"].is_null()) {
         let Some(b) = e["base"].as_str().and_then(|b| b.parse::<NaiveDate>().ok()) else {
             continue;
         };
-        if let Some(&(_, nav)) = rows.iter().find(|r| r.0 > b) {
-            e["actual"] = json!(nav);
-        }
+        let Some(&(date, nav)) = rows.iter().find(|r| r.0 > b) else {
+            continue;
+        };
+        let cutoff = date.and_hms_opt(6, 30, 0).unwrap().and_utc().to_rfc3339();
+        let runs = e["runs"].as_array().cloned().unwrap_or_default();
+        let before: Vec<&Value> = runs
+            .iter()
+            .filter(|r| r[0].as_str() < Some(&cutoff))
+            .collect();
+        // No run before the cutoff (the NAV came out between runs): nothing fair to score.
+        e["estimate"] = before.last().map_or(Value::Null, |r| r[1].clone());
+        e["actual"] = json!(nav);
+        e.as_object_mut().unwrap().remove("runs");
     }
 
     let base_str = base.to_string();
+    let run = json!([now.to_rfc3339(), estimate]);
     match list.iter_mut().find(|e| e["base"] == base_str.as_str()) {
-        Some(e) => e["estimate"] = json!(estimate),
+        Some(e) => e["runs"].as_array_mut().unwrap().push(run),
         None => {
-            let mut e = Map::new();
-            e.insert("base".into(), json!(base_str));
-            e.insert("estimate".into(), json!(estimate));
-            e.insert("actual".into(), Value::Null);
-            list.push(Value::Object(e));
+            list.push(json!({"base": base_str, "runs": [run], "estimate": null, "actual": null}))
         }
     }
     let excess = list.len().saturating_sub(HISTORY_KEEP);
@@ -854,22 +873,49 @@ fn round2(v: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{NaiveDate, fmt_num, json, record};
+    use super::{DateTime, NaiveDate, Utc, fmt_num, json, record};
 
     #[test]
     fn records_and_scores_estimates() {
         let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let t = |s: &str| s.parse::<DateTime<Utc>>().unwrap();
         let mut h = json!({});
-        // Two runs before the 11/04 NAV is out: the later estimate wins.
+        // 11/03 is a holiday. Runs on 11/03 evening and 11/04 morning, noon and evening.
         let rows = vec![(d("2026-10-30"), 100.0), (d("2026-11-02"), 101.0)];
-        assert_eq!(record(&mut h, "F", &rows, 102.0).count, 0);
-        record(&mut h, "F", &rows, 103.0);
-        // The 11/04 NAV (101.5) is published; the next run scores the 103.0 estimate.
-        let rows = [rows, vec![(d("2026-11-04"), 101.5)]].concat();
-        let a = record(&mut h, "F", &rows, 101.0);
+        assert_eq!(
+            record(&mut h, "F", &rows, 102.0, t("2026-11-03T10:17:00Z")).count,
+            0
+        );
+        record(&mut h, "F", &rows, 103.0, t("2026-11-03T22:17:00Z"));
+        record(&mut h, "F", &rows, 104.0, t("2026-11-04T04:17:00Z"));
+        // After 15:30 JST: the 11/04 NAV is already priced, so this run must not be scored.
+        record(&mut h, "F", &rows, 109.0, t("2026-11-04T10:17:00Z"));
+        // The 11/04 NAV (103.5) is out; the noon run's 104.0 is scored.
+        let rows = [rows, vec![(d("2026-11-04"), 103.5)]].concat();
+        let a = record(&mut h, "F", &rows, 110.0, t("2026-11-04T10:53:00Z"));
         assert_eq!(a.count, 1);
-        assert_eq!(a.mae, 1.5);
-        assert_eq!(a.last, Some((d("2026-11-02"), 103.0, 101.5)));
+        assert_eq!(a.mae, 0.5);
+        assert_eq!(a.last, Some((d("2026-11-02"), 104.0, 103.5)));
+        assert_eq!(h["F"].as_array().unwrap().len(), 2);
+        assert!(h["F"][0].get("runs").is_none());
+    }
+
+    #[test]
+    fn drops_old_pending_entries() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let mut h = json!({"F": [
+            {"base": "2026-10-30", "estimate": 100.0, "actual": 100.5},
+            {"base": "2026-11-02", "estimate": 109.0, "actual": null},
+        ]});
+        let rows = vec![(d("2026-11-02"), 101.0), (d("2026-11-04"), 103.5)];
+        let a = record(
+            &mut h,
+            "F",
+            &rows,
+            104.0,
+            "2026-11-04T10:53:00Z".parse().unwrap(),
+        );
+        assert_eq!(a.count, 1);
         assert_eq!(h["F"].as_array().unwrap().len(), 2);
     }
 
