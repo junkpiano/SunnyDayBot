@@ -985,6 +985,14 @@ fn pct_class(pct: f64) -> &'static str {
     }
 }
 
+fn weather(pct: f64) -> &'static str {
+    match pct_class(pct) {
+        "up" => "☀️",
+        "down" => "☔",
+        _ => "☁️",
+    }
+}
+
 fn fund_card(f: &FundResult) -> String {
     let drawdown = (f.nav / f.high - 1.0) * 100.0;
     let Some(estimate) = f.estimate else {
@@ -1001,7 +1009,7 @@ fn fund_card(f: &FundResult) -> String {
   <div class="row">
     <div><div class="label">NAV {date}</div><div class="num big {cls}">{nav}<small>円</small></div></div>
   </div>
-  <div class="change {cls}">{diff}円 ({change:+.2}%) vs {prev_date}</div>
+  <div class="change {cls}">{weather} {diff}円 ({change:+.2}%) vs {prev_date}</div>
   <div class="label">Published. The next estimate comes with the 7:17 update.</div>
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
@@ -1012,6 +1020,7 @@ fn fund_card(f: &FundResult) -> String {
             diff = format!("{}{}", if diff > 0.0 { "+" } else { "" }, fmt_num(diff, 0)),
             change = change,
             prev_date = f.prev.0.format("%m/%d"),
+            weather = weather(change),
             high = fmt_num(f.high, 0),
             high_date = f.high_date,
             accuracy = accuracy_line(&f.accuracy),
@@ -1037,7 +1046,7 @@ fn fund_card(f: &FundResult) -> String {
     <div class="arrow">→</div>
     <div><div class="label">{target}</div><div class="num big {cls}">{est}<small>円</small></div></div>
   </div>
-  <div class="change {cls}">{change:+.2}%</div>
+  <div class="change {cls}">{weather} {change:+.2}%</div>
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
         name = f.name,
@@ -1048,6 +1057,7 @@ fn fund_card(f: &FundResult) -> String {
         est = fmt_num(estimate, 0),
         cls = pct_class(change),
         change = change,
+        weather = weather(change),
         high = fmt_num(f.high, 0),
         high_date = f.high_date,
         drawdown = drawdown,
