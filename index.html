@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SunnyDay Bot</title>
+<meta name="description" content="Daily market forecasts and next NAV estimates for mutual funds.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☀️</text></svg>">
+<style>
+:root {
+  --bg: #f6f7f9; --card: #fff; --text: #14171c; --muted: #6b7280; --line: #e5e7eb;
+  --up: #15803d; --down: #dc2626; --accent: #f59e0b;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d1117; --card: #161b22; --text: #e6edf3; --muted: #8b949e; --line: #30363d;
+          --up: #3fb950; --down: #f85149; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-feature-settings: "tnum";
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.top h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+.top h1 span { color: var(--accent); }
+.top time { color: var(--muted); font-size: 13px; }
+h2 { font-size: 18px; margin: 32px 0 12px; }
+h2 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.card h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.row { display: flex; align-items: flex-end; gap: 10px; margin-top: 6px; }
+.arrow { color: var(--muted); padding-bottom: 4px; }
+.label { color: var(--muted); font-size: 12px; }
+.num { font-size: 20px; font-weight: 600; }
+.num.big { font-size: 28px; }
+.num small { font-size: 13px; margin-left: 2px; font-weight: 400; }
+.change { font-weight: 600; }
+.up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--muted); }
+.card footer { color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+.badge { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+.badge.buy { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+.badge.sell { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+.badge.hold { background: var(--line); color: var(--muted); }
+.badge.high { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+.card img { width: 100%; height: auto; border-radius: 8px; background: #fff; margin-top: 6px; }
+.star { background: none; border: 0; padding: 0 6px 0 0; font-size: 17px; line-height: 1; cursor: pointer; color: var(--accent); }
+.note { color: var(--muted); font-size: 12px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1><span>☀</span> SunnyDay Bot</h1>
+    <time>Updated 2026-11-07 23:17 JST</time>
+  </div>
+  <section id="favorites" hidden><h2>★ Favorites <span>saved in this browser</span></h2><div class="grid"></div></section>
+  <section><h2>MSCI <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>eMAXIS Slim 全世界株式（オール・カントリー）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">36,330<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">36,466<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.38%</div>
+  <footer>High since inception 39,019円 on 2026-08-14 · -6.9%<br>Estimate error: avg 103円 (0.28%) over 2 NAVs · after 11/05: 36,188 vs actual 36,330</footer>
+</article><article class="card">
+  <header><h3>楽天・プラス・オールカントリー株式インデックス・ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">18,711<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">18,781<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.38%</div>
+  <footer>High since inception 20,108円 on 2026-08-14 · -6.9%<br>Estimate error: avg 46円 (0.24%) over 3 NAVs · after 11/05: 18,647 vs actual 18,711</footer>
+</article><article class="card">
+  <header><h3>eMAXIS Slim 全世界株式（除く日本）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">36,744<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">36,882<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.38%</div>
+  <footer>High since inception 39,348円 on 2026-08-14 · -6.6%<br>Estimate error: avg 124円 (0.33%) over 2 NAVs · after 11/05: 36,554 vs actual 36,744</footer>
+</article><article class="card">
+  <header><h3>eMAXIS Slim 先進国株式インデックス</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">43,726<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">43,916<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.44%</div>
+  <footer>High since inception 46,611円 on 2026-08-14 · -6.2%<br>Estimate error: avg 189円 (0.42%) over 2 NAVs · after 11/05: 43,554 vs actual 43,726</footer>
+</article></div></section><section><h2>S&P500 <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>eMAXIS Slim 米国株式（S&P500）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">42,755<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">43,068<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.73%</div>
+  <footer>High since inception 45,727円 on 2026-08-14 · -6.5%<br>Estimate error: avg 1円 (0.00%) over 2 NAVs · after 11/05: 42,755 vs actual 42,755</footer>
+</article><article class="card">
+  <header><h3>SBI・V・S&P500インデックス・ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">39,080<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">39,366<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.73%</div>
+  <footer>High since inception 41,791円 on 2026-08-14 · -6.5%<br>Estimate error: avg 8円 (0.02%) over 2 NAVs · after 11/05: 39,082 vs actual 39,080</footer>
+</article><article class="card">
+  <header><h3>楽天・プラス・S&P500インデックス・ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">19,023<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">19,162<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.73%</div>
+  <footer>High since inception 20,346円 on 2026-08-14 · -6.5%<br>Estimate error: avg 2円 (0.01%) over 3 NAVs · after 11/05: 19,023 vs actual 19,023</footer>
+</article><article class="card">
+  <header><h3>iFreeレバレッジ S&P500</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">33,861<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">34,074<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.63%</div>
+  <footer>High since inception 38,852円 on 2026-08-14 · -12.8%<br>Estimate error: avg 34円 (0.09%) over 2 NAVs · after 11/05: 33,855 vs actual 33,861</footer>
+</article></div></section><section><h2>NASDAQ100 <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>ニッセイNASDAQ100インデックスファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">25,065<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">25,509<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +1.77%</div>
+  <footer>High since inception 29,517円 on 2026-10-07 · -15.1%<br>Estimate error: avg 0円 (0.00%) over 2 NAVs · after 11/05: 25,065 vs actual 25,065</footer>
+</article><article class="card">
+  <header><h3>楽天・プラス・NASDAQ-100インデックス・ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">16,879<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">17,178<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +1.77%</div>
+  <footer>High since inception 19,877円 on 2026-10-07 · -15.1%<br>Estimate error: avg 0円 (0.00%) over 2 NAVs · after 11/05: 16,879 vs actual 16,879</footer>
+</article><article class="card">
+  <header><h3>SBI NASDAQ100インデックス・ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">8,999<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">9,159<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +1.77%</div>
+  <footer>High since inception 10,598円 on 2026-10-07 · -15.1%<br>Estimate error: avg 0円 (0.00%) over 2 NAVs · after 11/05: 8,998 vs actual 8,999</footer>
+</article><article class="card">
+  <header><h3>iFreeレバレッジ NASDAQ100</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">56,033<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">57,549<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +2.71%</div>
+  <footer>High since inception 78,931円 on 2026-06-03 · -29.0%<br>Estimate error: avg 60円 (0.10%) over 2 NAVs · after 11/05: 55,981 vs actual 56,033</footer>
+</article><article class="card">
+  <header><h3>楽天レバレッジNASDAQ-100</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">12,702<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">13,046<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +2.71%</div>
+  <footer>High since inception 17,972円 on 2026-06-03 · -29.3%<br>Estimate error: avg 5円 (0.04%) over 2 NAVs · after 11/05: 12,694 vs actual 12,702</footer>
+</article><article class="card">
+  <header><h3>auAMレバレッジNASDAQ100為替ヘッジ無し</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">16,302<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">16,812<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +3.13%</div>
+  <footer>High since inception 22,913円 on 2026-06-03 · -28.9%<br>Estimate error: avg 18円 (0.10%) over 2 NAVs · after 11/05: 16,293 vs actual 16,302</footer>
+</article><article class="card">
+  <header><h3>NASDAQ100 3倍ブル</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">23,826<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">24,793<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +4.06%</div>
+  <footer>High since inception 41,650円 on 2026-06-03 · -42.8%<br>Estimate error: avg 17円 (0.07%) over 2 NAVs · after 11/05: 23,799 vs actual 23,826</footer>
+</article><article class="card">
+  <header><h3>auAMトリプル・NASDAQ100為替ヘッジ無し</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">6,813<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">7,119<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +4.49%</div>
+  <footer>High since inception 10,000円 on 2026-10-15 · -31.9%<br>Estimate error: avg 8円 (0.11%) over 2 NAVs · after 11/05: 6,798 vs actual 6,813</footer>
+</article></div></section><section><h2>FANG+ <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>iFreeNEXT FANG+インデックス</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">88,625<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">89,611<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +1.11%</div>
+  <footer>High since inception 104,358円 on 2026-10-08 · -15.1%<br>Estimate error: avg 2円 (0.00%) over 2 NAVs · after 11/05: 88,627 vs actual 88,625</footer>
+</article><article class="card">
+  <header><h3>iFreeレバレッジ FANG+</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">35,307<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">35,797<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +1.39%</div>
+  <footer>High since inception 49,212円 on 2026-10-08 · -28.3%<br>Estimate error: avg 105円 (0.29%) over 2 NAVs · after 11/05: 35,132 vs actual 35,307</footer>
+</article></div></section><section><h2>SOX <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>ニッセイSOX指数インデックスファンド（米国半導体株）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">34,118<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">35,701<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +4.64%</div>
+  <footer>High since inception 56,728円 on 2026-06-23 · -39.9%<br>Estimate error: avg 4円 (0.01%) over 2 NAVs · after 11/05: 34,111 vs actual 34,118</footer>
+</article><article class="card">
+  <header><h3>楽天・プラス・SOXインデックス・ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">22,783<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">23,840<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +4.64%</div>
+  <footer>High since inception 37,695円 on 2026-06-23 · -39.6%<br>Estimate error: avg 15円 (0.06%) over 2 NAVs · after 11/05: 22,766 vs actual 22,783</footer>
+</article></div></section><section><h2>SCHD <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>楽天・シュワブ・高配当株式・米国ファンド（資産成長型）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">14,343<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">14,301<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.29%</div>
+  <footer>High since inception 14,705円 on 2026-11-05 · -2.5%<br>Estimate error: avg 2円 (0.01%) over 3 NAVs · after 11/05: 14,344 vs actual 14,343</footer>
+</article><article class="card">
+  <header><h3>楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">14,060<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">14,019<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.29%</div>
+  <footer>High since inception 14,417円 on 2026-11-05 · -2.5%<br>Estimate error: avg 3円 (0.02%) over 3 NAVs · after 11/05: 14,063 vs actual 14,060</footer>
+</article><article class="card">
+  <header><h3>SBI・S・米国高配当株式ファンド（年4回決算型）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">13,137<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">13,098<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.29%</div>
+  <footer>High since inception 13,465円 on 2026-11-05 · -2.4%<br>Estimate error: avg 2円 (0.02%) over 2 NAVs · after 11/05: 13,135 vs actual 13,137</footer>
+</article></div></section><section><h2>Gold <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>三菱UFJ 純金ファンド</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">48,038<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">48,315<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.58%</div>
+  <footer>High since inception 66,958円 on 2026-01-29 · -28.3%<br>Estimate error: avg 141円 (0.29%) over 2 NAVs · after 11/05: 47,809 vs actual 48,038</footer>
+</article><article class="card">
+  <header><h3>楽天・ゴールド・ファンド（為替ヘッジなし）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">8,437<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">8,404<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.39%</div>
+  <footer>High since inception 10,970円 on 2026-03-03 · -23.1%<br>Estimate error: avg 2円 (0.02%) over 3 NAVs · after 11/05: 8,437 vs actual 8,437</footer>
+</article><article class="card">
+  <header><h3>楽天・ゴールド・ファンド（為替ヘッジあり）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">8,242<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">8,176<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.80%</div>
+  <footer>High since inception 11,103円 on 2026-01-30 · -25.8%<br>Estimate error: avg 2円 (0.02%) over 2 NAVs · after 11/05: 8,243 vs actual 8,242</footer>
+</article><article class="card">
+  <header><h3>SBI・iシェアーズ・ゴールドファンド（為替ヘッジなし）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">23,249<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">23,158<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.39%</div>
+  <footer>High since inception 29,876円 on 2026-03-03 · -22.2%<br>Estimate error: avg 415円 (1.81%) over 2 NAVs · after 11/05: 23,080 vs actual 23,249</footer>
+</article><article class="card">
+  <header><h3>SBI・iシェアーズ・ゴールドファンド（為替ヘッジあり）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">17,313<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">17,174<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.80%</div>
+  <footer>High since inception 22,966円 on 2026-03-03 · -24.6%<br>Estimate error: avg 307円 (1.80%) over 2 NAVs · after 11/05: 17,188 vs actual 17,313</footer>
+</article><article class="card">
+  <header><h3>ステート・ストリート・ゴールド・オープン（為替ヘッジなし）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">13,054<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">13,003<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.39%</div>
+  <footer>High since inception 16,980円 on 2026-03-03 · -23.1%<br>Estimate error: avg 1円 (0.01%) over 2 NAVs · after 11/05: 13,055 vs actual 13,054</footer>
+</article><article class="card">
+  <header><h3>アモーヴァ ゴールド・ファンド（為替ヘッジなし）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">43,149<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">42,981<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.39%</div>
+  <footer>High since inception 56,254円 on 2026-03-03 · -23.3%<br>Estimate error: avg 7円 (0.02%) over 2 NAVs · after 11/05: 43,160 vs actual 43,149</footer>
+</article><article class="card">
+  <header><h3>アモーヴァ ゴールド・ファンド（為替ヘッジあり）</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">21,941<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">21,765<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.80%</div>
+  <footer>High since inception 30,022円 on 2026-01-30 · -26.9%<br>Estimate error: avg 8円 (0.04%) over 2 NAVs · after 11/05: 21,949 vs actual 21,941</footer>
+</article></div></section><section><h2>Gold Plus <span>today's NAV estimates</span></h2><div class="grid"><article class="card">
+  <header><h3>Tracers MSCIオール・カントリー・ゴールドプラス</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">8,208<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">8,173<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.43%</div>
+  <footer>High since inception 10,234円 on 2026-03-11 · -19.8%<br>Estimate error: avg 11円 (0.13%) over 2 NAVs · after 11/05: 8,196 vs actual 8,208</footer>
+</article><article class="card">
+  <header><h3>Tracers S&P500ゴールドプラス</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">38,951<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big down">38,922<small>円</small></div></div>
+  </div>
+  <div class="change down">☔ -0.07%</div>
+  <footer>High since inception 49,015円 on 2026-03-03 · -20.5%<br>Estimate error: avg 68円 (0.17%) over 2 NAVs · after 11/05: 38,869 vs actual 38,951</footer>
+</article><article class="card">
+  <header><h3>Tracers NASDAQ100ゴールドプラス</h3></header>
+  <div class="row">
+    <div><div class="label">NAV 11/06</div><div class="num">16,144<small>円</small></div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">11/09 NAV estimate</div><div class="num big up">16,300<small>円</small></div></div>
+  </div>
+  <div class="change up">☀️ +0.97%</div>
+  <footer>High since inception 21,354円 on 2026-06-01 · -24.4%<br>Estimate error: avg 42円 (0.25%) over 2 NAVs · after 11/05: 16,094 vs actual 16,144</footer>
+</article></div></section><section><h2>Markets <span>30-day forecast</span></h2><div class="grid"><article class="card">
+  <header><h3>NASDAQ</h3><span class="badge buy">BUY</span></header>
+  <div class="row">
+    <div><div class="label">Now</div><div class="num">24,579.43</div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">30-day forecast</div><div class="num big up">25,445.25</div></div>
+  </div>
+  <div class="change up">+3.52%</div>
+  <footer>Range 24,593.54 – 26,293.10</footer>
+  <img src="NASDAQ_forecast.png" alt="NASDAQ forecast chart" loading="lazy">
+</article><article class="card">
+  <header><h3>S&P500</h3><span class="badge buy">BUY</span></header>
+  <div class="row">
+    <div><div class="label">Now</div><div class="num">7,376.86</div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">30-day forecast</div><div class="num big up">7,562.77</div></div>
+  </div>
+  <div class="change up">+2.52%</div>
+  <footer>Range 7,382.63 – 7,725.05</footer>
+  <img src="S%26P500_forecast.png" alt="S&P500 forecast chart" loading="lazy">
+</article><article class="card">
+  <header><h3>Nikkei225</h3><span class="badge buy">BUY</span></header>
+  <div class="row">
+    <div><div class="label">Now</div><div class="num">57,434.77</div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">30-day forecast</div><div class="num big up">63,732.81</div></div>
+  </div>
+  <div class="change up">+10.97%</div>
+  <footer>Range 60,984.55 – 66,495.02</footer>
+  <img src="Nikkei225_forecast.png" alt="Nikkei225 forecast chart" loading="lazy">
+</article><article class="card">
+  <header><h3>Gold</h3><span class="badge sell">SELL</span></header>
+  <div class="row">
+    <div><div class="label">Now</div><div class="num">4,074.90</div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">30-day forecast</div><div class="num big down">3,723.09</div></div>
+  </div>
+  <div class="change down">-8.63%</div>
+  <footer>Range 3,524.89 – 3,889.86</footer>
+  <img src="Gold_forecast.png" alt="Gold forecast chart" loading="lazy">
+</article><article class="card">
+  <header><h3>Bitcoin</h3><span class="badge sell">SELL</span></header>
+  <div class="row">
+    <div><div class="label">Now</div><div class="num">75,846.68</div></div>
+    <div class="arrow">→</div>
+    <div><div class="label">30-day forecast</div><div class="num big down">73,733.12</div></div>
+  </div>
+  <div class="change down">-2.79%</div>
+  <footer>Range 69,193.25 – 78,645.06</footer>
+  <img src="Bitcoin_forecast.png" alt="Bitcoin forecast chart" loading="lazy">
+</article></div></section>
+  <p class="note">
+    Next NAV estimate = latest NAV × change of the tracked index × change of USD/JPY since the closes that NAV was priced at.
+    Market forecasts come from a Prophet model; BUY/SELL/HOLD compares the current price with the forecast.
+    Mechanically computed figures for reference only. Not investment advice.
+  </p>
+</div>
+<script>
+// Favorites live in this browser's localStorage, keyed by card title.
+const KEY = 'favorites';
+const favs = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
+const fav = document.getElementById('favorites');
+const cards = [...document.querySelectorAll('section .card')];
+for (const card of cards) {
+  const h = card.querySelector('h3');
+  const b = document.createElement('button');
+  b.className = 'star';
+  b.dataset.name = h.textContent;
+  h.prepend(b);
+}
+function render() {
+  const picked = cards.filter(c => favs.has(c.querySelector('.star').dataset.name));
+  fav.querySelector('.grid').replaceChildren(...picked.map(c => c.cloneNode(true)));
+  fav.hidden = !picked.length;
+  for (const b of document.querySelectorAll('.star')) {
+    const on = favs.has(b.dataset.name);
+    b.textContent = on ? '★' : '☆';
+    b.title = on ? 'Remove from favorites' : 'Add to favorites';
+    b.setAttribute('aria-pressed', on);
+  }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('.star');
+  if (!b) return;
+  const n = b.dataset.name;
+  favs.has(n) ? favs.delete(n) : favs.add(n);
+  localStorage.setItem(KEY, JSON.stringify([...favs]));
+  render();
+});
+render();
+</script>
+</body>
+</html>
