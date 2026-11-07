@@ -558,12 +558,20 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
     };
 
     // Today's TTM once it is out, the live rate before that.
+    // Yahoo's daily USD/JPY closes can be off by most of a yen; the latest hourly bar isn't.
+    let live = || {
+        fetch_chart(USDJPY, "60m", "5d")
+            .ok()
+            .and_then(|s| s.last().map(|p| p.close))
+            .or(fx.last().map(|p| p.close))
+            .unwrap_or(f64::NAN)
+    };
     let fx_now = match usd_ttm(target) {
         Ok(Some(ttm)) => ttm,
-        Ok(None) => fx.last().map_or(f64::NAN, |p| p.close),
+        Ok(None) => live(),
         Err(err) => {
             eprintln!("Failed to fetch today's TTM: {:#}", err);
-            fx.last().map_or(f64::NAN, |p| p.close)
+            live()
         }
     };
     let mut ttms: HashMap<NaiveDate, Option<f64>> = HashMap::new();
