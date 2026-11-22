@@ -1,7 +1,7 @@
 # SunnyDay Bot: Technical Requirements Document
 
 How the features in the [PRD](PRD.md) are built and run. Requirement IDs (EST-4, HIST-7, …) are
-the PRD's. Design decisions for single features are in [`docs/design/`](design/).
+the PRD's.
 
 ## 1. Architecture
 
@@ -67,6 +67,9 @@ constant; [appendix A](#appendix-a-funds) has it as a table.
 - Once that NAV is out, `runs` is replaced by the chosen `estimate` and the `actual` NAV.
 - Up to 2,500 entries are kept per fund (`HISTORY_KEEP`). The card's error averages the latest
   120 (`SCORE_WINDOW`).
+- Estimates are kept here rather than read back from each published history file: in a trial,
+  GitHub Pages answered 503 for 9 of 34 such reads, and a file that can't be read can't be
+  rewritten safely.
 
 ### 3.3 `history/<fund_id>.json` (per-fund history, served to the chart)
 
@@ -203,11 +206,6 @@ The page is `src/template.html`, filled in with the cards and the update time.
 - **Credentials:** the publishing host's GitHub credentials are its only secret, and they
   never enter the repository.
 - **Repository contents:** the repository describes the setup, not any one host.
-
-## 10. Design documents
-
-- [History: sparklines and charts](design/history.md)
-- [Factor attribution](design/factor-attribution.md)
 
 ## Appendix A: Funds
 

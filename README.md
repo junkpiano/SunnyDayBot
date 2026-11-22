@@ -12,7 +12,6 @@ Estimates mutual fund NAVs before they are published, with market forecasts, as 
 ## Documents
 - [PRD](docs/PRD.md): every feature, its numbered requirements and state
 - [TRD](docs/TRD.md): how it is built and run
-- [docs/design/](docs/design/): design notes for single features
 
 ## Requirements
 - Rust toolchain (stable)

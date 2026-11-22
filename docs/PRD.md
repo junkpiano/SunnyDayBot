@@ -184,7 +184,7 @@ HIST-7.`).
 
 ## 7. Development
 
-- A big change starts with its requirements here, with new IDs, agreed before it is built; a
-  design doc in `docs/design/` records how a non-trivial one is built.
+- A big change starts with its requirements here, with new IDs, agreed before it is built; the
+  TRD records how it is built.
 - Test: `cargo test --release`. CI and builds: [TRD §7](TRD.md#7-build-test-and-ci).
 - Changes land on `main`; the site follows on the next scheduled run.
