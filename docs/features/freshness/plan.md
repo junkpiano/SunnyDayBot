@@ -9,4 +9,4 @@ Implements FRESH-1 of [spec.md](spec.md).
 
 ## Tests
 
-None; it is one format string.
+- `shows_funds_in_their_groups` checks the header's `Updated YYYY-MM-DD HH:MM JST` (FRESH-1).

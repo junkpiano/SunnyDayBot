@@ -455,6 +455,9 @@ struct Accuracy {
 }
 
 fn main() -> Result<()> {
+    // Stop rather than publish an empty history over the real one, before writing anything.
+    let mut history = load_history().context("load the published history")?;
+
     let site_dir = Path::new(SITE_DIR);
     fs::create_dir_all(site_dir).context("create site directory")?;
 
@@ -499,8 +502,6 @@ fn main() -> Result<()> {
         render_chart(name, &series, &forecast)?;
     }
 
-    // Stop rather than publish an empty history over the real one.
-    let mut history = load_history().context("load the published history")?;
     let funds = estimate_funds(&mut history);
     fs::write(
         site_dir.join(HISTORY_FILE),
@@ -642,14 +643,10 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
             .or(fx.last().map(|p| p.close))
             .unwrap_or(f64::NAN)
     };
-    let fx_now = match usd_ttm(target) {
-        Ok(Some(ttm)) => ttm,
-        Ok(None) => live(),
-        Err(err) => {
-            eprintln!("Failed to fetch today's TTM: {:#}", err);
-            live()
-        }
-    };
+    let fx_now = now_rate(
+        usd_ttm(target).inspect_err(|e| eprintln!("Failed to fetch today's TTM: {:#}", e)),
+        live,
+    );
     let mut ttms: HashMap<NaiveDate, Option<f64>> = HashMap::new();
 
     // Many funds share an index; fetch each once.
@@ -677,10 +674,8 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 return Ok((None, rows, prev, high_date, high));
             }
             let attribution = if let Some(etf) = f.tokyo_etf {
-                let series = fetch_series(etf)?;
-                if series.last().is_some_and(|p| p.date > date) {
-                    // Change since the ETF's close on the NAV date.
-                    Attribution::Etf(etf, change_since(&series, date.succ_opt().unwrap())?)
+                if let Some(change) = etf_change(&fetch_series(etf)?, date)? {
+                    Attribution::Etf(etf, change)
                 } else {
                     // Tokyo hasn't traded since. 15:30 JST. ponytail: hourly bars, so the base
                     // is up to an hour after the close.
@@ -712,10 +707,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                             .ok()
                             .flatten()
                     });
-                    Some(match base {
-                        Some(base) => fx_now / base,
-                        None => change_since(&fx, date)?,
-                    })
+                    Some(fx_part(base, fx_now, &fx, date)?)
                 };
                 Attribution::Parts { legs, fx }
             };
@@ -764,11 +756,18 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
 fn load_history() -> Result<Value> {
     let url = format!("{}{}", SITE_URL, HISTORY_FILE);
     let resp = reqwest::blocking::get(&url).with_context(|| format!("fetch {}", url))?;
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(json!({}));
+    let status = resp.status().as_u16();
+    read_history(status, &resp.text()?).with_context(|| format!("read {}", url))
+}
+
+/// The published history from its HTTP status and body: empty if it isn't there yet, an error
+/// for any other failure, so a run never starts from an empty history by mistake.
+fn read_history(status: u16, body: &str) -> Result<Value> {
+    match status {
+        404 => Ok(json!({})),
+        200..=299 => Ok(serde_json::from_str(body)?),
+        _ => Err(anyhow!("HTTP {}", status)),
     }
-    let text = resp.error_for_status()?.text()?;
-    serde_json::from_str(&text).with_context(|| format!("parse {}", url))
 }
 
 /// "253425" or "chart_100086" from a fund company's CSV URL, the ISIN from the association's.
@@ -945,8 +944,16 @@ fn fetch_nav(url: &str) -> Result<Vec<(NaiveDate, f64)>> {
         .and_then(|r| r.error_for_status())
         .and_then(|r| r.bytes())
         .with_context(|| format!("fetch NAV csv {}", url))?;
-    let rows: Vec<(NaiveDate, f64)> = String::from_utf8_lossy(&bytes)
-        .lines()
+    let rows = parse_nav(&String::from_utf8_lossy(&bytes));
+    if rows.is_empty() {
+        return Err(anyhow!("no NAV rows in csv {}", url));
+    }
+    Ok(rows)
+}
+
+/// The (date, NAV) rows of a NAV CSV; lines that aren't a date and a number are skipped.
+fn parse_nav(text: &str) -> Vec<(NaiveDate, f64)> {
+    text.lines()
         .filter_map(|line| {
             let mut cols = line.split(',');
             // "2026/11/02" or "2026年11月02日" (Shift_JIS, so the kanji are mangled here).
@@ -962,17 +969,43 @@ fn fetch_nav(url: &str) -> Result<Vec<(NaiveDate, f64)>> {
             let nav = cols.next()?.parse::<f64>().ok()?;
             Some((date, nav))
         })
-        .collect();
-    if rows.is_empty() {
-        return Err(anyhow!("no NAV rows in csv {}", url));
-    }
-    Ok(rows)
+        .collect()
 }
 
 /// Latest close / last close dated before `nav_date`. A NAV for Japan date D is priced at the
 /// foreign closes of the day before D and at D's morning USD/JPY, which is the close before D.
 // ponytail: ignores ETF ex-dividend drops (ACWI, twice a year) and Japan-stock timing; correct for them if the error matters.
 /// Latest close / close of the last bar that started before `at`.
+/// The rate an estimate converts to: the target date's TTM once it is out, else `live()`.
+fn now_rate(target_ttm: Result<Option<f64>>, live: impl FnOnce() -> f64) -> f64 {
+    match target_ttm {
+        Ok(Some(ttm)) => ttm,
+        _ => live(),
+    }
+}
+
+/// USD/JPY's change since the NAV was converted: from the NAV date's TTM to `now`, or along the
+/// daily closes when that TTM couldn't be fetched.
+fn fx_part(
+    nav_ttm: Option<f64>,
+    now: f64,
+    daily: &[SeriesPoint],
+    nav_date: NaiveDate,
+) -> Result<f64> {
+    match nav_ttm {
+        Some(base) => Ok(now / base),
+        None => change_since(daily, nav_date),
+    }
+}
+
+/// A Tokyo ETF's change since its close on `nav_date`; None until it has traded after it.
+fn etf_change(series: &[SeriesPoint], nav_date: NaiveDate) -> Result<Option<f64>> {
+    if !series.last().is_some_and(|p| p.date > nav_date) {
+        return Ok(None);
+    }
+    change_since(series, nav_date.succ_opt().unwrap()).map(Some)
+}
+
 fn change_since_time(series: &[SeriesPoint], at: DateTime<Utc>) -> Result<f64> {
     let base = series
         .iter()
@@ -1446,6 +1479,200 @@ mod tests {
         Attribution, DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, fund_id,
         history_file, json, nav_target, parse_ttm, record, sparkline,
     };
+
+    use super::{
+        Accuracy, FundResult, HISTORY_KEEP, accuracy_line, build_html, classify, etf_change,
+        fund_card, fx_part, now_rate, parse_nav, read_history,
+    };
+
+    fn day(s: &str) -> NaiveDate {
+        s.parse().unwrap()
+    }
+
+    fn point(date: &str, close: f64) -> SeriesPoint {
+        SeriesPoint {
+            date: day(date),
+            at: Utc::now(),
+            close,
+        }
+    }
+
+    /// A fund on NAV 100 (11/20, previous 98), high 110 on 11/02, nothing scored yet.
+    fn fund(group: &'static str, name: &str, estimate: Option<f64>) -> FundResult {
+        FundResult {
+            group,
+            name: name.to_string(),
+            id: "F".to_string(),
+            date: day("2026-11-20"),
+            nav: 100.0,
+            prev: (day("2026-11-19"), 98.0),
+            target: day("2026-11-23"),
+            estimate,
+            attribution: estimate.map(|e| Attribution::Parts {
+                legs: vec![("^GSPC", 1.0, e / 100.0)],
+                fx: None,
+            }),
+            high_date: day("2026-11-02"),
+            high: 110.0,
+            spark: vec![98.0, 100.0],
+            accuracy: Accuracy {
+                count: 0,
+                mae: 0.0,
+                mape: 0.0,
+                last: None,
+            },
+        }
+    }
+
+    // FUND-2
+    #[test]
+    fn parses_nav_csvs() {
+        let csv = "\u{fffd}\u{fffd},\u{fffd}\u{fffd}\n2026/11/02,37188,100\n\
+                   2026\u{fffd}11\u{fffd}04\u{fffd},37306.5,101\nnot,a row\n2026/13/01,1\n";
+        assert_eq!(
+            parse_nav(csv),
+            vec![(day("2026-11-02"), 37188.0), (day("2026-11-04"), 37306.5)]
+        );
+    }
+
+    // EST-4
+    #[test]
+    fn converts_at_the_ttm_once_it_is_out() {
+        assert_eq!(now_rate(Ok(Some(158.0)), || 157.5), 158.0);
+        assert_eq!(now_rate(Ok(None), || 157.5), 157.5);
+        assert_eq!(now_rate(Err(anyhow::anyhow!("down")), || 157.5), 157.5);
+        let daily = [point("2026-11-19", 150.0), point("2026-11-20", 153.0)];
+        assert!(
+            (fx_part(Some(150.0), 151.5, &daily, day("2026-11-20")).unwrap() - 1.01).abs() < 1e-12
+        );
+        // Without the NAV date's TTM: latest daily close / last close before the NAV date.
+        assert_eq!(
+            fx_part(None, 151.5, &daily, day("2026-11-20")).unwrap(),
+            1.02
+        );
+    }
+
+    // EST-6
+    #[test]
+    fn follows_the_tokyo_etf_once_it_has_traded() {
+        let before = [point("2026-11-19", 100.0), point("2026-11-20", 102.0)];
+        assert_eq!(etf_change(&before, day("2026-11-20")).unwrap(), None);
+        let after = [point("2026-11-20", 102.0), point("2026-11-21", 104.04)];
+        assert!((etf_change(&after, day("2026-11-20")).unwrap().unwrap() - 1.02).abs() < 1e-12);
+    }
+
+    // NAV-1, FUND-1, FRESH-1
+    #[test]
+    fn shows_funds_in_their_groups() {
+        let funds = [
+            fund("MSCI", "A", Some(101.0)),
+            fund("S&P500", "B", Some(101.0)),
+            fund("MSCI", "C", Some(101.0)),
+        ];
+        let html = build_html(&[], &funds);
+        let at = |t: &str| html.find(t).unwrap();
+        assert!(
+            at("<h2>MSCI ") < at(">A<") && at(">A<") < at(">C<") && at(">C<") < at("<h2>S&P500 ")
+        );
+        let updated = &html[at("Updated ")..];
+        assert!(updated[8..].starts_with("20") && updated[24..].starts_with(" JST"));
+    }
+
+    // NAV-1, NAV-2, NAV-3, ATTR-1
+    #[test]
+    fn shows_the_estimate_and_its_change() {
+        let up = fund_card(&fund("G", "F", Some(102.0)));
+        assert!(up.contains("NAV 11/20") && up.contains("11/23 NAV estimate"));
+        assert!(up.contains(r#"class="change up">☀️ +2.00%"#));
+        assert!(up.contains("S&P500 +2.00% · USD/JPY hedged"));
+        assert!(
+            fund_card(&fund("G", "F", Some(97.0))).contains(r#"class="change down">☔ -3.00%"#)
+        );
+        assert!(
+            fund_card(&fund("G", "F", Some(100.0))).contains(r#"class="change flat">☁️ +0.00%"#)
+        );
+    }
+
+    // NAV-4, ATTR-1
+    #[test]
+    fn shows_a_published_nav() {
+        let card = fund_card(&fund("G", "F", None));
+        assert!(card.contains(r#"class="change up">☀️ +2円 (+2.04%) vs 11/19"#));
+        assert!(card.contains("next estimate comes with the 7:17 update"));
+        assert!(!card.contains("USD/JPY"));
+    }
+
+    // ACC-1, ACC-2
+    #[test]
+    fn shows_the_high_and_drawdown() {
+        let card = fund_card(&fund("G", "F", Some(102.0)));
+        assert!(card.contains("High since inception 110円 on 2026-11-02 · -9.1%"));
+        assert!(!card.contains("🎉"));
+        assert!(fund_card(&fund("G", "F", Some(111.0))).contains("🎉 New high (estimate)"));
+        let mut at_high = fund("G", "F", Some(99.0));
+        at_high.high = 100.0;
+        assert!(fund_card(&at_high).contains("🎉 High on 11/20"));
+        at_high.estimate = None;
+        assert!(fund_card(&at_high).contains("🎉 High today"));
+    }
+
+    // ACC-3
+    #[test]
+    fn shows_the_estimate_error() {
+        let mut a = fund("G", "F", None).accuracy;
+        assert_eq!(accuracy_line(&a), "Estimate error: collecting");
+        a.count = 12;
+        a.mae = 70.4;
+        a.mape = 0.19;
+        a.last = Some((day("2026-11-19"), 35558.0, 35574.0));
+        let line = accuracy_line(&a);
+        assert!(
+            line.starts_with("Estimate error: avg 70円 (0.19%) over 12 NAVs"),
+            "{line}"
+        );
+        assert!(line.contains("35,558") && line.contains("35,574"), "{line}");
+    }
+
+    // MKT-2
+    #[test]
+    fn classifies_markets() {
+        assert_eq!(classify(97.9, 100.0), "BUY");
+        assert_eq!(classify(98.0, 100.0), "HOLD");
+        assert_eq!(classify(102.0, 100.0), "HOLD");
+        assert_eq!(classify(102.1, 100.0), "SELL");
+    }
+
+    // OPS-2
+    #[test]
+    fn reads_the_published_history() {
+        assert_eq!(read_history(404, "Not Found").unwrap(), json!({}));
+        assert_eq!(read_history(200, r#"{"F": []}"#).unwrap(), json!({"F": []}));
+        assert!(read_history(503, "").is_err());
+        assert!(read_history(200, "<html>").is_err());
+    }
+
+    // OPS-3
+    #[test]
+    fn keeps_at_most_2500_entries() {
+        let start = day("2010-01-01");
+        let list: Vec<_> = (0..HISTORY_KEEP as i64 + 5)
+            .map(|i| json!({"base": (start + chrono::Duration::days(i)).to_string(), "estimate": 1.0, "actual": 1.0}))
+            .collect();
+        let mut h = json!({ "F": list });
+        let rows = vec![(day("2026-11-20"), 1.0)];
+        record(
+            &mut h,
+            "F",
+            &rows,
+            None,
+            "2026-11-20T00:00:00Z".parse().unwrap(),
+        );
+        assert_eq!(h["F"].as_array().unwrap().len(), HISTORY_KEEP);
+        assert_eq!(
+            h["F"][0]["base"],
+            (start + chrono::Duration::days(5)).to_string()
+        );
+    }
 
     // ATTR-2 to ATTR-6
     #[test]

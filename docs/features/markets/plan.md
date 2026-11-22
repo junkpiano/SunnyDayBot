@@ -23,4 +23,6 @@ Implements MKT-1 to MKT-3 of [spec.md](spec.md).
 
 ## Tests
 
-None for the forecast; `classify()`'s thresholds are one comparison each.
+- `classifies_markets`: BUY, HOLD and SELL around the 2% thresholds (MKT-2).
+- MKT-1 and MKT-3 depend on live data and the model; they are seen in a generated site and the run
+  log.

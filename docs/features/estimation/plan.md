@@ -42,10 +42,10 @@ For latest NAV N dated d and target date T:
 | `targets_todays_nav` | EST-1 |
 | `ignores_closes_after_the_target` | EST-2 |
 | `attributes_estimates` (attribution) | EST-3, EST-5 through `ratio()` |
-| `parses_ttm` | EST-8 |
+| `converts_at_the_ttm_once_it_is_out` | EST-4: `now_rate()` and `fx_part()` |
+| `follows_the_tokyo_etf_once_it_has_traded` | EST-6: `etf_change()` |
 | `records_and_scores_estimates`, `drops_old_pending_entries` | EST-7 |
-
-EST-4 and EST-6 depend on live data and have no unit test.
+| `parses_ttm` | EST-8 |
 
 ## Limits
 

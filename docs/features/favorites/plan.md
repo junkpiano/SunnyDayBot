@@ -15,7 +15,7 @@ All in the script in `src/template.html`:
 
 ## Tests
 
-None in CI. The 2026-11-22 browser check confirmed that starring a card doesn't close its chart,
+None in CI: the page script has no test runner here. The 2026-11-22 browser check confirmed that starring a card doesn't close its chart,
 and that the favorites copy has no chart.
 
 ## Limits

@@ -20,6 +20,10 @@ Implements FUND-1 to FUND-3 of [spec.md](spec.md).
 
 ## Tests
 
-- No unit test yet for `fetch_nav()`'s parsing (FUND-2); add one with both date forms if it
-  changes.
-- FUND-1 and FUND-3 are seen in a generated `site/index.html` and in the run log.
+| Test | Covers |
+|---|---|
+| `parses_nav_csvs` | FUND-2: `parse_nav()` with both date forms and rows to skip |
+| `shows_funds_in_their_groups` | FUND-1 (group order) |
+
+FUND-3 (a failing fund is skipped) is in `estimate_funds()`'s network path and is seen in the run
+log.

@@ -28,7 +28,7 @@ Implements ACC-1 to ACC-3 of [spec.md](spec.md).
 
 | Test | Covers |
 |---|---|
+| `shows_the_high_and_drawdown` | ACC-1, ACC-2 (all three badges) |
+| `shows_the_estimate_error` | ACC-3: the line, and "collecting" before any is scored |
 | `records_and_scores_estimates` | ACC-3: count, MAE and the latest comparison |
 | `keeps_estimates_past_the_score_window` | ACC-3: only the latest 120 are averaged |
-
-ACC-1 and ACC-2 are rendered HTML and have no unit test.

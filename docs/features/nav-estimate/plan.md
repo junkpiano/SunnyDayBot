@@ -23,6 +23,9 @@ Implements NAV-1 to NAV-4 of [spec.md](spec.md).
 
 ## Tests
 
-- `formats_numbers`: `fmt_num`.
-- NAV-1 to NAV-4 render HTML and have no unit test; they are checked by looking at a generated
-  `site/index.html`.
+| Test | Covers |
+|---|---|
+| `shows_funds_in_their_groups` | NAV-1 (groups in order) |
+| `shows_the_estimate_and_its_change` | NAV-1, NAV-2, NAV-3 |
+| `shows_a_published_nav` | NAV-4 |
+| `formats_numbers` | `fmt_num` |

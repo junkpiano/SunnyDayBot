@@ -38,6 +38,8 @@ enum Attribution {
 
 - `attributes_estimates`: the line and `ratio()` for one leg unhedged, leveraged hedged, two legs
   and the Tokyo ETF (ATTR-2, 3, 4, 5, 6).
+- `shows_the_estimate_and_its_change`, `shows_a_published_nav`: the line on an estimate card and
+  none on a published one (ATTR-1).
 - One real run on 2026-11-22: eMAXIS Slim 米国株式（S&P500） showed -4.30% and
   `S&P500 -3.70% · USD/JPY -0.63%`; (1 − 0.0370) × (1 − 0.0063) − 1 = −4.31%, the same within
   rounding.
