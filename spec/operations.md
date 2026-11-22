@@ -10,9 +10,16 @@ How the site is built, published and kept up to date.
 `index.html` (from `src/template.html`), `history.json`, `history/<fund_id>.json` and
 `<market>_forecast.png`.
 
-**Schedule.** It runs twice a day, at 07:17 JST (after the US close, for the day's estimates)
-and 19:17 JST (after most NAVs are out, to show them and score the morning's estimates). The
-"published" card points to the 07:17 update.
+**Schedule.** It runs at :17 past the hour, every day, at these times (JST):
+
+- 07:17, after the US close: the day's estimates.
+- 13:17, after MUFG has published the day's TTM (around 10:00): estimates converted at the
+  rate the funds will use.
+- Every hour from 19:17 to 23:17: the fund companies' NAVs come out in the evening and the
+  Investment Trusts Association's late at night; each run shows the ones out by then and
+  scores the morning's estimates.
+
+The "published" card points to the 07:17 update, the next one that estimates.
 
 **Publishing.** A scheduled host runs the arm64 binary built by CI and pushes `site/` as a
 single commit to the `gh-pages` branch, which GitHub Pages serves. It doesn't run on GitHub
