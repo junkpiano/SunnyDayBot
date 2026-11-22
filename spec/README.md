@@ -20,6 +20,13 @@ One file per feature:
 - [history](history.md)
 - [favorites](favorites.md)
 - [data-freshness](data-freshness.md)
+- [markets](markets.md)
+
+How it works:
+
+- [funds](funds.md): the funds and what each holds
+- [estimation](estimation.md): how a NAV is estimated and scored
+- [operations](operations.md): build, schedule, publishing, history, data sources
 
 ## 4. Non-Functional Requirements
 
@@ -33,3 +40,10 @@ One file per feature:
 - **Factor Attribution Breakdown:** Show how much of the estimated NAV change comes from underlying index movement vs. USD/JPY exchange rate fluctuation.
 - **Push / Webhook Notifications:** Optional daily summary alerts via Telegram or Web Push when estimates exceed a user-defined volatility threshold (e.g., ±2.0%).
 - **Custom Dip Alerts:** Notify users when a favorited fund crosses a target drawdown threshold from its All-Time High (e.g., -10% or -15%).
+
+## Development
+
+- Test: `cargo test --release` (needs `pkg-config` and fontconfig headers).
+- CI: `.github/workflows/build.yml` on GitHub runs the tests on pull requests and pushes to
+  `main`, and on `main` keeps the arm64 binary.
+- Changes land on `main`; the published site follows on the next scheduled run.
