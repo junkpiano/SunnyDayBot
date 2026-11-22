@@ -10,8 +10,9 @@ Estimates mutual fund NAVs before they are published, with market forecasts, as 
 - Renders charts and writes the site to `site/`.
 
 ## Documents
-- [PRD](docs/PRD.md): every feature, its numbered requirements and state
-- [TRD](docs/TRD.md): how it is built and run
+- [PRD](docs/PRD.md): the product, its features and their state, non-functional requirements
+- [TRD](docs/TRD.md): architecture, shared data, build and CI
+- [docs/features/](docs/features/): each feature's `spec.md` (numbered acceptance criteria) and `plan.md` (how it is built)
 
 ## Requirements
 - Rust toolchain (stable)
