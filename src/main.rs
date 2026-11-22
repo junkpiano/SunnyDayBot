@@ -379,11 +379,70 @@ struct FundResult {
     target: NaiveDate,
     /// None once the `target` NAV is published: the one after it needs closes that haven't happened.
     estimate: Option<f64>,
+    /// What moved `estimate`; None with it.
+    attribution: Option<Attribution>,
     high_date: NaiveDate,
     high: f64,
     /// NAVs of the last 30 days, oldest first.
     spark: Vec<f64>,
     accuracy: Accuracy,
+}
+
+/// What an estimate is made of: estimate = NAV × `ratio()`.
+#[derive(Debug, PartialEq)]
+enum Attribution {
+    /// (ticker, weight, change) of each leg, and USD/JPY's change; None for a hedged fund.
+    Parts {
+        legs: Vec<(&'static str, f64, f64)>,
+        fx: Option<f64>,
+    },
+    /// The change of the Tokyo ETF's yen price, which can't be split.
+    Etf(&'static str, f64),
+}
+
+impl Attribution {
+    fn ratio(&self) -> f64 {
+        match self {
+            Attribution::Parts { legs, fx } => {
+                (1.0 + legs.iter().map(|&(_, w, c)| w * (c - 1.0)).sum::<f64>()) * fx.unwrap_or(1.0)
+            }
+            Attribution::Etf(_, change) => *change,
+        }
+    }
+
+    /// "S&P500 -3.21% · USD/JPY -0.92%"
+    fn line(&self) -> String {
+        let pct = |c: f64| format!("{:+.2}%", (c - 1.0) * 100.0);
+        match self {
+            Attribution::Parts { legs, fx } => legs
+                .iter()
+                .map(|&(t, w, c)| match w {
+                    1.0 => format!("{} {}", leg_name(t), pct(c)),
+                    _ => format!("{} {} ×{}", leg_name(t), pct(c), w),
+                })
+                .chain(std::iter::once(match fx {
+                    Some(fx) => format!("USD/JPY {}", pct(*fx)),
+                    None => "USD/JPY hedged".to_string(),
+                }))
+                .collect::<Vec<_>>()
+                .join(" · "),
+            Attribution::Etf(t, c) => format!("{} {}", leg_name(t), pct(*c)),
+        }
+    }
+}
+
+fn leg_name(ticker: &str) -> &str {
+    match ticker {
+        "^GSPC" => "S&P500",
+        "^NDX" => "NASDAQ100",
+        "ACWI" => "MSCI ACWI",
+        "URTH" => "MSCI World",
+        "^NYFANG" => "FANG+",
+        "^SOX" => "SOX",
+        "GLDM" | "GC=F" => "Gold",
+        "1540.T" => "1540 (yen)",
+        other => other,
+    }
 }
 
 /// How past estimates compared with the NAVs that were then published.
@@ -599,7 +658,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
     for f in FUNDS {
         let name = f.name;
         type Fetched = (
-            Option<f64>,
+            Option<Attribution>,
             Vec<(NaiveDate, f64)>,
             (NaiveDate, f64),
             NaiveDate,
@@ -607,7 +666,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
         );
         let fund = (|| -> Result<Fetched> {
             let rows = fetch_nav(f.url)?;
-            let (date, nav) = *rows.last().unwrap();
+            let date = rows.last().unwrap().0;
             let prev = rows[rows.len().saturating_sub(2)];
             // The latest of equal highs, so a fund back at its high shows today's date.
             let (high_date, high) = rows
@@ -617,29 +676,35 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
             if date >= target {
                 return Ok((None, rows, prev, high_date, high));
             }
-            let ratio = if let Some(etf) = f.tokyo_etf {
-                let etf = fetch_series(etf)?;
-                if etf.last().is_some_and(|p| p.date > date) {
+            let attribution = if let Some(etf) = f.tokyo_etf {
+                let series = fetch_series(etf)?;
+                if series.last().is_some_and(|p| p.date > date) {
                     // Change since the ETF's close on the NAV date.
-                    change_since(&etf, date.succ_opt().unwrap())?
+                    Attribution::Etf(etf, change_since(&series, date.succ_opt().unwrap())?)
                 } else {
                     // Tokyo hasn't traded since. 15:30 JST. ponytail: hourly bars, so the base
                     // is up to an hour after the close.
                     let close = date.and_hms_opt(6, 30, 0).unwrap().and_utc();
-                    change_since_time(&fetch_chart(f.legs[0].0, "60m", "1mo")?, close)?
-                        * change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?
+                    let leg = change_since_time(&fetch_chart(f.legs[0].0, "60m", "1mo")?, close)?;
+                    let fx = change_since_time(&fetch_chart(USDJPY, "60m", "1mo")?, close)?;
+                    Attribution::Parts {
+                        legs: vec![(f.legs[0].0, 1.0, leg)],
+                        fx: Some(fx),
+                    }
                 }
             } else {
                 // Closes before the target date: later ones belong to the NAV after it.
-                let mut ratio = 1.0;
+                let mut legs = Vec::new();
                 for &(ticker, weight) in f.legs {
                     let series = match cache.get(ticker) {
                         Some(series) => series,
                         None => cache.entry(ticker).or_insert(fetch_series(ticker)?),
                     };
-                    ratio += weight * (change_between(series, date, target)? - 1.0);
+                    legs.push((ticker, weight, change_between(series, date, target)?));
                 }
-                if !f.hedged {
+                let fx = if f.hedged {
+                    None
+                } else {
                     // The NAV was converted at that day's TTM.
                     let base = *ttms.entry(date).or_insert_with(|| {
                         usd_ttm(date)
@@ -647,16 +712,19 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                             .ok()
                             .flatten()
                     });
-                    ratio *= match base {
+                    Some(match base {
                         Some(base) => fx_now / base,
                         None => change_since(&fx, date)?,
-                    };
-                }
-                ratio
+                    })
+                };
+                Attribution::Parts { legs, fx }
             };
-            Ok((Some(nav * ratio), rows, prev, high_date, high))
+            Ok((Some(attribution), rows, prev, high_date, high))
         })()
-        .map(|(estimate, rows, prev, high_date, high)| {
+        .map(|(attribution, rows, prev, high_date, high)| {
+            let estimate = attribution
+                .as_ref()
+                .map(|a| rows.last().unwrap().1 * a.ratio());
             let accuracy = record(history, name, &rows, estimate, Utc::now());
             let id = fund_id(f.url);
             if let Err(e) = archive(&id, &rows, &history[name]) {
@@ -673,6 +741,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 prev,
                 target,
                 estimate,
+                attribution,
                 high_date,
                 high,
                 spark: rows
@@ -1149,12 +1218,17 @@ fn fund_card(f: &FundResult) -> String {
     <div><div class="label">{target}</div><div class="num big {cls}">{est}<small>円</small></div></div>
   </div>
   <div class="change {cls}">{weather} {change:+.2}%</div>
+  <div class="label">{attribution}</div>
   {spark}
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
         name = f.name,
         id = f.id,
         spark = sparkline(&f.spark),
+        attribution = f
+            .attribution
+            .as_ref()
+            .map_or(String::new(), Attribution::line),
         target = target,
         badge = badge,
         date = f.date.format("%m/%d"),
@@ -1369,9 +1443,41 @@ fn round2(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, fund_id, history_file,
-        json, nav_target, parse_ttm, record, sparkline,
+        Attribution, DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, fund_id,
+        history_file, json, nav_target, parse_ttm, record, sparkline,
     };
+
+    // ATTR-2 to ATTR-6
+    #[test]
+    fn attributes_estimates() {
+        let one = Attribution::Parts {
+            legs: vec![("^GSPC", 1.0, 0.9679)],
+            fx: Some(0.9908),
+        };
+        assert_eq!(one.line(), "S&P500 -3.21% · USD/JPY -0.92%");
+        assert!((one.ratio() - 0.9679 * 0.9908).abs() < 1e-12);
+
+        let lev = Attribution::Parts {
+            legs: vec![("^NDX", 3.0, 0.985)],
+            fx: None,
+        };
+        assert_eq!(lev.line(), "NASDAQ100 -1.50% ×3 · USD/JPY hedged");
+        assert!((lev.ratio() - 0.955).abs() < 1e-12);
+
+        let two = Attribution::Parts {
+            legs: vec![("ACWI", 1.0, 1.004), ("GLDM", 1.0, 1.011)],
+            fx: Some(1.0),
+        };
+        assert_eq!(
+            two.line(),
+            "MSCI ACWI +0.40% · Gold +1.10% · USD/JPY +0.00%"
+        );
+        assert!((two.ratio() - 1.015).abs() < 1e-12);
+
+        let etf = Attribution::Etf("1540.T", 1.0085);
+        assert_eq!(etf.line(), "1540 (yen) +0.85%");
+        assert_eq!(etf.ratio(), 1.0085);
+    }
 
     // HIST-7
     #[test]
