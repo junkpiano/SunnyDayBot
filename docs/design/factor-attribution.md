@@ -1,6 +1,6 @@
 # Design: factor attribution
 
-Implements [spec/factor-attribution.md](../../spec/factor-attribution.md) (ATTR-1 to ATTR-6).
+Implements ATTR-1 to ATTR-6 of the [PRD](../PRD.md#35-factor-attribution-attr).
 
 ## Approach
 
@@ -15,7 +15,7 @@ enum Attribution {
 estimate = NAV × attribution.ratio()
 ```
 
-- `ratio()` is the formula from [estimation](../../spec/estimation.md):
+- `ratio()` is the formula from [TRD §4.1](../TRD.md#41-estimate-est-16-attr-16):
   - `Parts`: (1 + Σ weight × (change − 1)) × fx, where a hedged fund's fx is 1;
   - `Etf`: the ETF's change.
 - Because the estimate is computed from the parts, ATTR-5 (the parts combine to the change)

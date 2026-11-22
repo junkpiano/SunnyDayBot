@@ -9,6 +9,11 @@ Estimates mutual fund NAVs before they are published, with market forecasts, as 
 - Estimates today's NAV of mutual funds (MSCI, S&P500, NASDAQ100, FANG+, SOX, SCHD, gold and gold-plus funds, including leveraged and yen-hedged ones), marks new highs since inception, and scores past estimates against the published NAVs (`site/history.json`, read back from the live site on each run).
 - Renders charts and writes the site to `site/`.
 
+## Documents
+- [PRD](docs/PRD.md): every feature, its numbered requirements and state
+- [TRD](docs/TRD.md): how it is built and run
+- [docs/design/](docs/design/): design notes for single features
+
 ## Requirements
 - Rust toolchain (stable)
 - `pkg-config` and fontconfig headers for the charts (`libfontconfig1-dev` on Debian/Ubuntu)

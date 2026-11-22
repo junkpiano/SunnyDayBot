@@ -1,6 +1,6 @@
 # Design: fund history and charts
 
-Implements [spec/history.md](../../spec/history.md) (HIST-1 to HIST-10).
+Implements HIST-1 to HIST-10 of the [PRD](../PRD.md#36-history-sparklines-and-charts-hist).
 
 ## Goal
 
@@ -18,7 +18,7 @@ NAV CSV, last 30 days ───────── sparkline() ──> inline <sv
 ```
 
 Each run already downloads every fund's full NAV CSV and the published `history.json`
-(see [operations](../../spec/operations.md)). Both inputs are complete, so the history files
+(see [TRD §6](../TRD.md#6-operations-ops-13-nfr-1)). Both inputs are complete, so the history files
 are rebuilt from scratch on every run. Nothing is appended, and nothing has to be read back.
 
 ## History file
