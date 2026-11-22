@@ -21,6 +21,7 @@ One file per feature:
 - [favorites](favorites.md)
 - [data-freshness](data-freshness.md)
 - [markets](markets.md)
+- [factor-attribution](factor-attribution.md)
 
 How it works:
 
@@ -37,7 +38,6 @@ How it works:
 
 ## 5. Future Roadmap (Post-MVP Ideas)
 
-- **Factor Attribution Breakdown:** Show how much of the estimated NAV change comes from underlying index movement vs. USD/JPY exchange rate fluctuation.
 - **Push / Webhook Notifications:** Optional daily summary alerts via Telegram or Web Push when estimates exceed a user-defined volatility threshold (e.g., ±2.0%).
 - **Custom Dip Alerts:** Notify users when a favorited fund crosses a target drawdown threshold from its All-Time High (e.g., -10% or -15%).
 
