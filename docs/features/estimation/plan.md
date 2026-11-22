@@ -33,7 +33,7 @@ For latest NAV N dated d and target date T:
   latest NAV date. When the next NAV appears in the CSV, the entry keeps the last run before
   06:30 UTC on that NAV's date as its `estimate`, and the NAV as `actual`; with no such run,
   `estimate` is null and it isn't scored. The format of `history.json` is in the
-  [TRD](../../TRD.md).
+  [operations plan](../operations/plan.md#historyjson-state-between-runs).
 
 ## Tests
 

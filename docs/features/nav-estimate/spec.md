@@ -27,6 +27,11 @@ How the estimate is made is the [estimation](../estimation/spec.md) feature.
 - NAV-4: Once the target date's NAV is published, the card shows it with its change in 円 and %
   from the previous NAV, and says the next estimate comes with the 07:17 update.
 
+## Non-functional
+
+- NFR-4: Mobile viewports, light and dark themes following the system, tabular numerals, and a
+  touch-scrubbable chart. Met; touch scrubbing not yet tried on a real phone.
+
 ## Not doing
 
 - Investment advice: every figure is a mechanical estimate, and the page says so.

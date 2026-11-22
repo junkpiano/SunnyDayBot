@@ -36,6 +36,13 @@ page load.
 - HIST-9: Each fund's history file is under 50 KB gzipped.
 - HIST-10: If a history file can't be fetched, the open card says so; the rest of the page works.
 
+## Non-functional
+
+- NFR-2: Fast first load: only cards and sparklines at first, history on demand. Met:
+  `index.html` is 9 KB gzipped and no history is fetched on load.
+- NFR-3: History payload under 50 KB gzipped per fund (HIST-9). Met: largest 31 KB
+  (三菱UFJ 純金ファンド).
+
 ## Not doing
 
 - A separate CSV backfill: the NAV CSVs already cover every NAV since inception.

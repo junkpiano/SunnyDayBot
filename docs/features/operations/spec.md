@@ -23,6 +23,11 @@ Keep the site up to date by itself, and never publish worse data than it already
   anything is written.
 - OPS-3: Up to 2,500 estimates are kept per fund.
 
+## Non-functional
+
+- NFR-1: A static site on GitHub Pages, rebuilt on the schedule above. Met: built by one binary
+  run and published to `gh-pages`.
+
 ## Not doing
 
 - Describing one particular host's setup in the repository.

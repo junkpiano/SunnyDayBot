@@ -19,6 +19,11 @@ Let a reader keep the funds they hold at the top of the page, without an account
 - FAV-3: Favorites are kept in this browser's localStorage, keyed by card title, and survive a
   reload; nothing is sent anywhere.
 
+## Non-functional
+
+- NFR-6: No personal data: no accounts, nothing sent from the browser. Met: favorites stay in
+  localStorage.
+
 ## Not doing
 
 - Accounts or syncing favorites between devices.

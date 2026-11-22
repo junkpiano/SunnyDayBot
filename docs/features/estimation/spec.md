@@ -38,6 +38,12 @@ the NAV is out.
 - EST-8: The TTM is read from MUFG's page for the exact date, and nothing is returned when the
   page is for another date.
 
+## Non-functional
+
+- NFR-5: MAPE under 0.25% across the major global and US equity index funds. Met: 0.080% over
+  122 NAVs across 10 funds (estimates for the NAVs after 2026-11-02 to 11-19). Gold funds are
+  higher, up to about 0.7%.
+
 ## Not doing
 
 Known gaps, each small next to the daily move; correct for them if the error matters:

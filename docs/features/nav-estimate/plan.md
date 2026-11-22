@@ -12,6 +12,16 @@ Implements NAV-1 to NAV-4 of [spec.md](spec.md).
 | Numbers | `fmt_num()`: thousands separators, no `-0` |
 | Target date | `nav_target()`, from the [estimation](../estimation/plan.md) feature |
 
+## Page
+
+`src/template.html` is filled in with the cards and the update time.
+
+- **Styles:** CSS variables for the light and dark themes (`prefers-color-scheme`), and
+  `font-feature-settings: "tnum"` for tabular numerals; cards in a responsive grid.
+- **Script:** plain JavaScript, inline, no framework or library. One delegated click handler
+  serves favorites and charts ([favorites](../favorites/plan.md),
+  [history](../history/plan.md)).
+
 ## How it works
 
 - `estimate_funds()` returns a `FundResult` per fund: latest NAV and date, previous NAV, target
