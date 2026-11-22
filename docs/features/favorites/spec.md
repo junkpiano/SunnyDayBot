@@ -16,13 +16,13 @@ Let a reader keep the funds they hold at the top of the page, without an account
 - FAV-1: Every card, fund or market, has a ☆ button that turns to ★ when starred.
 - FAV-2: Starred cards are shown again in a "★ Favorites" section at the top, which is hidden
   when nothing is starred.
-- FAV-3: Favorites are kept in this browser's localStorage, keyed by card title, and survive a
+- FAV-3: Favorites are kept in this browser's own storage, keyed by card title, and survive a
   reload; nothing is sent anywhere.
 
 ## Non-functional
 
 - NFR-6: No personal data: no accounts, nothing sent from the browser. Met: favorites stay in
-  localStorage.
+  the browser.
 
 ## Not doing
 

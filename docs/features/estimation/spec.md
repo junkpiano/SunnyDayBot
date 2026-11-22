@@ -16,10 +16,14 @@ the NAV is out.
   - **Index change** = 1 + Σ weight × (leg change − 1). A leg's change runs from its last close
     before the NAV date to its last close before the target date.
   - **Currency change** (unhedged funds only) = current USD/JPY ÷ the NAV date's TTM. The
-    current rate is the target date's TTM once it is out, before that the latest hourly
-    USD/JPY.
-  - **Fund holding a Tokyo ETF:** priced at its NAV date's own Tokyo close, so once the ETF has
-    traded since, the estimate follows the ETF's yen price.
+    current rate is the target date's TTM once it is out; before that the latest hourly
+    USD/JPY close, or the latest daily close if the hourly one can't be had (daily USD/JPY
+    closes can be off by most of a yen, hourly ones aren't). Without the NAV date's TTM, the
+    currency change is the latest daily close ÷ the last daily close before the NAV date.
+  - **Fund holding a Tokyo ETF:** priced at its NAV date's own Tokyo close. Once the ETF has
+    traded since, the estimate is the ETF's yen change since its close on the NAV date. Before
+    that, it is the first leg's change times USD/JPY's change, both since 15:30 JST on the NAV
+    date, from hourly prices.
 - **Scoring:** every run records its estimate. A NAV dated D is priced at closes up to 15:30 JST
   on D, so once it is published it is scored against the last estimate made before then.
 

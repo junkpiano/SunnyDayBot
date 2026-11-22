@@ -2,6 +2,9 @@
 
 Implements OPS-1 to OPS-3 of [spec.md](spec.md).
 
+The data sources and the `history.json` format this plan reads and writes are contracts in
+[spec.md](spec.md).
+
 ## Architecture
 
 ```
@@ -20,37 +23,6 @@ NAV CSVs ─> │        ▲                                               │  
 - **Browser script:** the page's script is plain JavaScript inlined in `index.html`, with no
   framework and no library. It does favorites and charts.
 
-## Data sources
-
-| Data | Source | Used for |
-|---|---|---|
-| Index, ETF, gold, Bitcoin closes; USD/JPY daily and hourly | Yahoo Finance chart API | Estimates, forecasts |
-| Fund NAVs since inception | Fund company CSVs (MUFG, Rakuten) or the Investment Trusts Association library | Latest NAV, high, history, scoring |
-| USD TTM | MUFG (`murc-kawasesouba.jp`) | The currency part of estimates |
-
-The fund list, with each fund's CSV, tickers, weights, hedge and Tokyo ETF, is the `FUNDS`
-constant; [funds/spec.md](../funds/spec.md) has it as a table.
-
-## `history.json` (state between runs)
-
-```json
-{"<fund name>": [
-  {"base": "2026-11-02", "runs": [["2026-11-03T22:17:00Z", 37306.2], ...], "estimate": null, "actual": null},
-  {"base": "2026-10-30", "estimate": 37100.0, "actual": 37090.0}
-]}
-```
-
-- `base` is the NAV date the estimate starts from. While the next NAV is pending, every run
-  appends `[time, estimate]` to `runs`.
-- Once that NAV is out, `runs` is replaced by the chosen `estimate` and the `actual` NAV.
-- Up to 2,500 entries are kept per fund (`HISTORY_KEEP`). The card's error averages the latest
-  120 (`SCORE_WINDOW`).
-- Estimates are kept here rather than read back from each published history file: in a trial,
-  GitHub Pages answered 503 for 9 of 34 such reads, and a file that can't be read can't be
-  rewritten safely.
-
-The per-fund history files are described in [history/plan.md](../history/plan.md).
-
 ## Security and privacy
 
 - **No accounts and no tracking.** The browser sends nothing. Favorites stay in localStorage.
@@ -58,6 +30,11 @@ The per-fund history files are described in [history/plan.md](../history/plan.md
 - **Credentials:** the publishing host's GitHub credentials are its only secret, and they
   never enter the repository.
 - **Repository contents:** the repository describes the setup, not any one host.
+
+## Why not GitHub Actions' schedule
+
+GitHub drops scheduled runs, and `am.mufg.jp` refuses GitHub's runners, so a host of our own runs
+it from cron.
 
 ## Code and setup
 

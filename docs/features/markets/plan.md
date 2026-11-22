@@ -14,11 +14,8 @@ Implements MKT-1 to MKT-3 of [spec.md](spec.md).
 
 ## How it works
 
-- Five years of daily closes (`HISTORY_YEARS`); Prophet with default settings is trained on the
-  latest 180 (`TRAIN_DAYS`) and predicts 30 days (`FORECAST_DAYS`).
-- The range is Prophet's interval, or ±1.96 standard deviations of the training closes when
-  Prophet gives none.
-- The chart (1280×720) shows the closes, the forecast and its range, and today's price marked.
+- The spec's settings are constants: `HISTORY_YEARS` = 5, `TRAIN_DAYS` = 180, `FORECAST_DAYS` = 30.
+- The fallback range is computed by `stddev()` when `augurs` returns no interval.
 - `main()` skips a market whose data or forecast fails and goes on.
 
 ## Tests

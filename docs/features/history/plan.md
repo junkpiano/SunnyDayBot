@@ -27,14 +27,14 @@ history files are rebuilt from scratch each run; nothing is appended or read bac
 - An estimate is matched to a NAV through its `history.json` entry: the entry's `base` is the NAV
   before it, so its NAV is the first CSV row after `base`. Unscored entries are skipped, and those
   rows have nulls.
-- error_jpy = estimate − actual (2 decimals); error_pct = (estimate ÷ actual − 1) × 100 (3
-  decimals); drawdown_pct = (NAV ÷ highest NAV so far − 1) × 100 (2 decimals).
-- `fund_id()`: the CSV's file name without `.csv` (`253425`, `chart_100086`), or the `isinCd`
-  value (`JP90C000J569`).
+- The format and fund_id rule are the contract in [spec.md](spec.md); `fund_id()` implements the
+  latter.
 - **Keeping estimates (HIST-8):** `history.json` keeps `HISTORY_KEEP` = 2,500 entries per fund
   (about ten years), while the card's error uses the latest `SCORE_WINDOW` = 120. Reading each
   published history file back instead was tried and rejected: GitHub Pages answered 503 for 9 of
   34 reads, and a file that can't be read can't be rewritten safely.
+
+No charting library: the chart is an inline SVG drawn by a few lines of script.
 
 ## Sparkline (HIST-1)
 

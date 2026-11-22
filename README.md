@@ -44,6 +44,12 @@ built). Tests are named after the IDs where they can be, and commits cite them (
 Each feature's own non-goals are in its spec.
 
 ## Development
+The documents are the product; `src/` is one implementation of them and can be replaced. Each
+spec says what the product does and the contracts it must keep (data sources, published file
+formats), with no language, framework or library in it, so the product can be rebuilt in any
+stack and checked against the same acceptance IDs. Each plan says how the current
+implementation does it.
+
 - **New feature:** create `docs/features/<feature>/spec.md` with new IDs and agree it before
   building. Then write its `plan.md`, build against the IDs, and add it to the table above.
 - **Change to a feature:** update its `spec.md` first, then its code, tests and `plan.md`.

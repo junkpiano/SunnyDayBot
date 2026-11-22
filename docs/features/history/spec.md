@@ -17,9 +17,26 @@ page load.
   is first opened, as one file per fund with the fields date, actual_nav, estimated_nav,
   error_jpy, error_pct and drawdown_pct.
 
+## Contract: history file
+
+`history/<fund_id>.json` at the site root, fetched by the page:
+
+```json
+{"fields": ["date", "actual_nav", "estimated_nav", "error_jpy", "error_pct", "drawdown_pct"],
+ "rows": [["2026-11-20", 35574.0, 35558.0, -16.0, -0.045, -8.8], ...]}
+```
+
+- One row per published NAV, oldest first. The estimate columns are null where no estimate was
+  scored against that NAV.
+- error_jpy = estimate − actual, 2 decimals; error_pct = (estimate ÷ actual − 1) × 100, 3
+  decimals; drawdown_pct = (NAV ÷ highest NAV so far − 1) × 100, 2 decimals.
+- **fund_id** is the code in the fund's NAV CSV address: the file name without `.csv` for the
+  fund companies' CSVs (`253425`, `chart_100086`), the `isinCd` value for the Investment Trusts
+  Association's (`JP90C000J569`).
+
 ## Acceptance
 
-- HIST-1: Every fund card shows an SVG sparkline of its NAVs over the last 30 days, coloured up or
+- HIST-1: Every fund card shows a sparkline of its NAVs over the last 30 days, coloured up or
   down by the move across them.
 - HIST-2: Opening the page fetches no history file; opening a card fetches that fund's file once.
 - HIST-3: Tapping a fund card opens its chart; tapping the card again closes it. The ★ button and
@@ -39,7 +56,7 @@ page load.
 ## Non-functional
 
 - NFR-2: Fast first load: only cards and sparklines at first, history on demand. Met:
-  `index.html` is 9 KB gzipped and no history is fetched on load.
+  the page is 9 KB gzipped and no history is fetched on load.
 - NFR-3: History payload under 50 KB gzipped per fund (HIST-9). Met: largest 31 KB
   (三菱UFJ 純金ファンド).
 
@@ -47,4 +64,3 @@ page load.
 
 - A separate CSV backfill: the NAV CSVs already cover every NAV since inception.
 - History charts for the market cards: they already have the forecast PNG.
-- A charting library: the chart is an inline SVG drawn by a few lines of script.

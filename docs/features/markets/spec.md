@@ -10,6 +10,12 @@ A 30-day outlook for the markets behind the funds, shown below the fund groups.
 - Each card shows the current price and a forecast for day 30, with the % change between them,
   the forecast range, a BUY / SELL / HOLD badge, and a chart of five years of prices with the
   forecast.
+- **Forecast:** five years of daily closes; a Prophet model (additive trend and seasonality,
+  default settings) trained on the latest 180 closes forecasts the next 30 days. The range is
+  the model's uncertainty interval, or ±1.96 standard deviations of the training closes when
+  it gives none.
+- **Chart:** a 1280×720 image of the five years of closes, the forecast and its range, with
+  today's price marked.
 - The badge is BUY when the price is more than 2% below the forecast, SELL when more than 2%
   above, HOLD otherwise.
 - The page says the figures are mechanical and not investment advice.
