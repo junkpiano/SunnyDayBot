@@ -21,6 +21,7 @@ cargo run --release
 Artifacts:
 - `site/index.html` (from `src/template.html`)
 - `site/*_forecast.png`
+- `site/history/<fund>.json`, each fund's NAVs, estimates and drawdown, fetched when its card is opened
 
 ## CI
 `.github/workflows/build.yml` runs the unit tests, and on `main` also builds an arm64 binary as a run artifact.

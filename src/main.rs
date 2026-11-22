@@ -17,7 +17,20 @@ const SITE_DIR: &str = "site";
 // Each run reads the published history back from here, adds to it and publishes it again.
 const SITE_URL: &str = "https://junkpiano.github.io/SunnyDayBot/";
 const HISTORY_FILE: &str = "history.json";
-const HISTORY_KEEP: usize = 120;
+/// Entries kept per fund in history.json, about ten years: they feed the history files.
+const HISTORY_KEEP: usize = 2500;
+/// The estimate error shown is the average over this many latest NAVs.
+const SCORE_WINDOW: usize = 120;
+/// Per-fund history files, fetched by the page when a card is opened.
+const HISTORY_DIR: &str = "history";
+const HISTORY_FIELDS: [&str; 6] = [
+    "date",
+    "actual_nav",
+    "estimated_nav",
+    "error_jpy",
+    "error_pct",
+    "drawdown_pct",
+];
 const HTTP_RETRIES: usize = 2;
 const HTTP_BACKOFF_SECS: u64 = 2;
 
@@ -356,6 +369,8 @@ struct AssetResult {
 struct FundResult {
     group: &'static str,
     name: String,
+    /// Names the fund's file under `history/`.
+    id: String,
     date: NaiveDate,
     nav: f64,
     /// The NAV before `nav`.
@@ -366,6 +381,8 @@ struct FundResult {
     estimate: Option<f64>,
     high_date: NaiveDate,
     high: f64,
+    /// NAVs of the last 30 days, oldest first.
+    spark: Vec<f64>,
     accuracy: Accuracy,
 }
 
@@ -581,7 +598,14 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
     let mut funds = Vec::new();
     for f in FUNDS {
         let name = f.name;
-        let fund = (|| -> Result<FundResult> {
+        type Fetched = (
+            Option<f64>,
+            Vec<(NaiveDate, f64)>,
+            (NaiveDate, f64),
+            NaiveDate,
+            f64,
+        );
+        let fund = (|| -> Result<Fetched> {
             let rows = fetch_nav(f.url)?;
             let (date, nav) = *rows.last().unwrap();
             let prev = rows[rows.len().saturating_sub(2)];
@@ -591,18 +615,7 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 .copied()
                 .fold(rows[0], |h, r| if r.1 >= h.1 { r } else { h });
             if date >= target {
-                return Ok(FundResult {
-                    group: f.group,
-                    name: name.to_string(),
-                    date,
-                    nav,
-                    prev,
-                    target,
-                    estimate: None,
-                    high_date,
-                    high,
-                    accuracy: record(history, name, &rows, None, Utc::now()),
-                });
+                return Ok((None, rows, prev, high_date, high));
             }
             let ratio = if let Some(etf) = f.tokyo_etf {
                 let etf = fetch_series(etf)?;
@@ -641,10 +654,20 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 }
                 ratio
             };
-            let estimate = Some(nav * ratio);
-            Ok(FundResult {
+            Ok((Some(nav * ratio), rows, prev, high_date, high))
+        })()
+        .map(|(estimate, rows, prev, high_date, high)| {
+            let accuracy = record(history, name, &rows, estimate, Utc::now());
+            let id = fund_id(f.url);
+            if let Err(e) = archive(&id, &rows, &history[name]) {
+                eprintln!("Failed to write the history of {}: {:#}", name, e);
+            }
+            let (date, nav) = *rows.last().unwrap();
+            let month_ago = date - Duration::days(30);
+            FundResult {
                 group: f.group,
                 name: name.to_string(),
+                id,
                 date,
                 nav,
                 prev,
@@ -652,9 +675,14 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                 estimate,
                 high_date,
                 high,
-                accuracy: record(history, name, &rows, estimate, Utc::now()),
-            })
-        })();
+                spark: rows
+                    .iter()
+                    .filter(|r| r.0 >= month_ago)
+                    .map(|r| r.1)
+                    .collect(),
+                accuracy,
+            }
+        });
         match fund {
             Ok(fund) => funds.push(fund),
             Err(err) => eprintln!("Failed to estimate {}: {:#}", name, err),
@@ -672,6 +700,69 @@ fn load_history() -> Result<Value> {
     }
     let text = resp.error_for_status()?.text()?;
     serde_json::from_str(&text).with_context(|| format!("parse {}", url))
+}
+
+/// "253425" or "chart_100086" from a fund company's CSV URL, the ISIN from the association's.
+fn fund_id(url: &str) -> String {
+    match url.split_once("isinCd=") {
+        Some((_, rest)) => rest.split('&').next().unwrap().to_string(),
+        None => url
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .trim_end_matches(".csv")
+            .to_string(),
+    }
+}
+
+/// Writes `history/<id>.json` (see `history_file`) from the NAV CSV and history.json.
+fn archive(id: &str, rows: &[(NaiveDate, f64)], scored: &Value) -> Result<()> {
+    let dir = Path::new(SITE_DIR).join(HISTORY_DIR);
+    fs::create_dir_all(&dir).context("create history directory")?;
+    let scored = scored.as_array().map_or(&[][..], |v| v);
+    fs::write(
+        dir.join(format!("{}.json", id)),
+        serde_json::to_string(&history_file(rows, scored))?,
+    )
+    .with_context(|| format!("write history of {}", id))
+}
+
+/// {"fields": [...HISTORY_FIELDS], "rows": [["2026-11-20", 35574.0, 35558.0, -16.0, -0.045, -8.8], ...]}:
+/// every NAV in `rows`, oldest first, with the estimate scored against it (null where there is
+/// none) and its error, and the drawdown from the highest NAV up to that day.
+fn history_file(rows: &[(NaiveDate, f64)], scored: &[Value]) -> Value {
+    let mut estimates: HashMap<String, f64> = HashMap::new();
+    for e in scored {
+        let base = e["base"].as_str().and_then(|b| b.parse::<NaiveDate>().ok());
+        let (Some(base), Some(estimate)) = (base, e["estimate"].as_f64()) else {
+            continue;
+        };
+        if let Some(r) = rows.iter().find(|r| r.0 > base) {
+            estimates.insert(r.0.to_string(), estimate);
+        }
+    }
+    let round = |v: f64, d: i32| (v * 10f64.powi(d)).round() / 10f64.powi(d);
+    let mut high = f64::MIN;
+    let rows: Vec<Value> = rows
+        .iter()
+        .map(|&(date, nav)| {
+            high = high.max(nav);
+            let date = date.to_string();
+            let drawdown = round((nav / high - 1.0) * 100.0, 2);
+            match estimates.get(&date) {
+                Some(&est) => json!([
+                    date,
+                    nav,
+                    round(est, 2),
+                    round(est - nav, 2),
+                    round((est / nav - 1.0) * 100.0, 3),
+                    drawdown
+                ]),
+                None => json!([date, nav, null, null, null, drawdown]),
+            }
+        })
+        .collect();
+    json!({"fields": HISTORY_FIELDS, "rows": rows})
 }
 
 /// Records this run's `estimate` of the NAV after the latest one in `rows`, and scores past
@@ -731,7 +822,7 @@ fn record(
     let excess = list.len().saturating_sub(HISTORY_KEEP);
     list.drain(..excess);
 
-    score(list)
+    score(&list[list.len().saturating_sub(SCORE_WINDOW)..])
 }
 
 fn score(list: &[Value]) -> Accuracy {
@@ -1012,16 +1103,19 @@ fn fund_card(f: &FundResult) -> String {
             ""
         };
         return format!(
-            r#"<article class="card">
+            r#"<article class="card" data-fund="{id}">
   <header><h3>{name}</h3>{badge}</header>
   <div class="row">
     <div><div class="label">NAV {date}</div><div class="num big {cls}">{nav}<small>円</small></div></div>
   </div>
   <div class="change {cls}">{weather} {diff}円 ({change:+.2}%) vs {prev_date}</div>
   <div class="label">Published. The next estimate comes with the 7:17 update.</div>
+  {spark}
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
             name = f.name,
+            id = f.id,
+            spark = sparkline(&f.spark),
             date = f.date.format("%m/%d"),
             nav = fmt_num(f.nav, 0),
             cls = pct_class(change),
@@ -1047,7 +1141,7 @@ fn fund_card(f: &FundResult) -> String {
         String::new()
     };
     format!(
-        r#"<article class="card">
+        r#"<article class="card" data-fund="{id}">
   <header><h3>{name}</h3>{badge}</header>
   <div class="row">
     <div><div class="label">NAV {date}</div><div class="num">{nav}<small>円</small></div></div>
@@ -1055,9 +1149,12 @@ fn fund_card(f: &FundResult) -> String {
     <div><div class="label">{target}</div><div class="num big {cls}">{est}<small>円</small></div></div>
   </div>
   <div class="change {cls}">{weather} {change:+.2}%</div>
+  {spark}
   <footer>High since inception {high}円 on {high_date} · {drawdown:+.1}%<br>{accuracy}</footer>
 </article>"#,
         name = f.name,
+        id = f.id,
+        spark = sparkline(&f.spark),
         target = target,
         badge = badge,
         date = f.date.format("%m/%d"),
@@ -1070,6 +1167,33 @@ fn fund_card(f: &FundResult) -> String {
         high_date = f.high_date,
         drawdown = drawdown,
         accuracy = accuracy_line(&f.accuracy),
+    )
+}
+
+/// A line through `navs` filling a 100×30 box, coloured by the move from first to last.
+fn sparkline(navs: &[f64]) -> String {
+    if navs.len() < 2 {
+        return String::new();
+    }
+    let lo = navs.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = navs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let span = (hi - lo).max(f64::EPSILON);
+    let step = 100.0 / (navs.len() - 1) as f64;
+    let points: Vec<String> = navs
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            format!(
+                "{:.1},{:.1}",
+                i as f64 * step,
+                29.0 - (v - lo) / span * 28.0
+            )
+        })
+        .collect();
+    format!(
+        r#"<svg class="spark {}" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points="{}"/></svg>"#,
+        pct_class(navs[navs.len() - 1] - navs[0]),
+        points.join(" ")
     )
 }
 
@@ -1245,9 +1369,98 @@ fn round2(v: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, json, nav_target,
-        parse_ttm, record,
+        DateTime, NaiveDate, SeriesPoint, Utc, change_between, fmt_num, fund_id, history_file,
+        json, nav_target, parse_ttm, record, sparkline,
     };
+
+    // HIST-7
+    #[test]
+    fn writes_fund_history() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let rows = [
+            (d("2026-11-02"), 100.0),
+            (d("2026-11-04"), 110.0),
+            (d("2026-11-05"), 99.0),
+            (d("2026-11-06"), 104.5),
+        ];
+        let scored = [
+            json!({"base": "2026-10-30", "estimate": 101.0, "actual": 100.0}),
+            json!({"base": "2026-11-02", "estimate": 111.0, "actual": 110.0}),
+            json!({"base": "2026-11-04", "estimate": null, "actual": 99.0}),
+            json!({"base": "2026-11-05", "runs": [["2026-11-05T22:17:00Z", 105.0]], "estimate": null, "actual": null}),
+        ];
+        let f = history_file(&rows, &scored);
+        assert_eq!(f["fields"][2], "estimated_nav");
+        assert_eq!(
+            f["rows"][0],
+            json!(["2026-11-02", 100.0, 101.0, 1.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            f["rows"][1],
+            json!(["2026-11-04", 110.0, 111.0, 1.0, 0.909, 0.0])
+        );
+        assert_eq!(
+            f["rows"][2],
+            json!(["2026-11-05", 99.0, null, null, null, -10.0])
+        );
+        assert_eq!(
+            f["rows"][3],
+            json!(["2026-11-06", 104.5, null, null, null, -5.0])
+        );
+    }
+
+    // HIST-8: estimates outlive the scoring window.
+    #[test]
+    fn keeps_estimates_past_the_score_window() {
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let start = d("2020-01-01");
+        // 130 scored NAVs: the 10 oldest were 10 off, the rest exact.
+        let list: Vec<_> = (0..130)
+            .map(|i| {
+                let base = (start + chrono::Duration::days(i)).to_string();
+                let est = if i < 10 { 110.0 } else { 100.0 };
+                json!({"base": base, "estimate": est, "actual": 100.0})
+            })
+            .collect();
+        let mut h = json!({ "F": list });
+        let rows = vec![(start + chrono::Duration::days(130), 100.0)];
+        let a = record(
+            &mut h,
+            "F",
+            &rows,
+            None,
+            "2026-11-04T10:53:00Z".parse().unwrap(),
+        );
+        assert_eq!(h["F"].as_array().unwrap().len(), 130);
+        assert_eq!(a.count, 120);
+        assert_eq!(a.mae, 0.0);
+    }
+
+    #[test]
+    fn names_funds_by_code() {
+        assert_eq!(
+            fund_id("https://www.am.mufg.jp/fund_file/setteirai/253425.csv"),
+            "253425"
+        );
+        assert_eq!(
+            fund_id("https://www.rakuten-toushin.co.jp/assets/csv/chart_100086.csv"),
+            "chart_100086"
+        );
+        assert_eq!(
+            fund_id("https://toushin-lib.fwg.ne.jp/x?isinCd=JP90C000J569&associFundCd=89311199"),
+            "JP90C000J569"
+        );
+    }
+
+    // HIST-1
+    #[test]
+    fn draws_sparklines() {
+        let s = sparkline(&[100.0, 90.0, 95.0]);
+        assert!(s.contains(r#"class="spark down""#));
+        assert!(s.contains(r#"points="0.0,1.0 50.0,29.0 100.0,15.0""#));
+        assert!(sparkline(&[5.0, 5.0]).contains("spark flat"));
+        assert_eq!(sparkline(&[1.0]), "");
+    }
 
     #[test]
     fn records_and_scores_estimates() {

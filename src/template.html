@@ -53,6 +53,19 @@ h2 span { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 6
 .card img { width: 100%; height: auto; border-radius: 8px; background: #fff; margin-top: 6px; }
 .star { background: none; border: 0; padding: 0 6px 0 0; font-size: 17px; line-height: 1; cursor: pointer; color: var(--accent); }
 .note { color: var(--muted); font-size: 12px; margin-top: 40px; }
+.spark { display: block; width: 100%; height: 30px; }
+.spark polyline, .chart path { fill: none; stroke: currentColor; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.card[data-fund] { cursor: pointer; }
+.chart { cursor: default; border-top: 1px solid var(--line); padding-top: 8px; }
+.chart svg { display: block; width: 100%; height: auto; margin: 6px 0; touch-action: pan-y; }
+.chart[data-mode="dd"] path { color: var(--down); }
+.chart circle { fill: var(--accent); }
+.chart text { fill: var(--muted); font-size: 10px; }
+.chart line { stroke: var(--muted); stroke-dasharray: 2 2; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tabs span { flex: 1; }
+.tabs button { background: none; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: inherit; font-size: 12px; padding: 2px 10px; cursor: pointer; }
+.tabs button.on { color: var(--text); border-color: var(--text); }
 </style>
 </head>
 <body>
@@ -84,7 +97,11 @@ for (const card of cards) {
 }
 function render() {
   const picked = cards.filter(c => favs.has(c.querySelector('.star').dataset.name));
-  fav.querySelector('.grid').replaceChildren(...picked.map(c => c.cloneNode(true)));
+  fav.querySelector('.grid').replaceChildren(...picked.map(c => {
+    const copy = c.cloneNode(true);
+    copy.querySelector('.chart')?.remove();
+    return copy;
+  }));
   fav.hidden = !picked.length;
   for (const b of document.querySelectorAll('.star')) {
     const on = favs.has(b.dataset.name);
@@ -95,13 +112,97 @@ function render() {
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('.star');
-  if (!b) return;
-  const n = b.dataset.name;
-  favs.has(n) ? favs.delete(n) : favs.add(n);
-  localStorage.setItem(KEY, JSON.stringify([...favs]));
-  render();
+  if (b) {
+    const n = b.dataset.name;
+    favs.has(n) ? favs.delete(n) : favs.add(n);
+    localStorage.setItem(KEY, JSON.stringify([...favs]));
+    render();
+    return;
+  }
+  const box = e.target.closest('.chart');
+  if (box) {
+    const t = e.target.closest('button');
+    const h = histories[box.closest('.card').dataset.fund];
+    if (t && h) {
+      Object.assign(box.dataset, t.dataset);
+      draw(box, h.rows);
+    }
+    return;
+  }
+  const card = e.target.closest('.card[data-fund]');
+  if (!card) return;
+  const open = card.querySelector('.chart');
+  open ? open.remove() : openChart(card);
 });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.matches('.card[data-fund]')) e.target.click();
+});
+for (const c of document.querySelectorAll('.card[data-fund]')) c.tabIndex = 0;
 render();
+
+// A fund's chart: its history file is fetched the first time its card is opened.
+// Rows are [date, actual_nav, estimated_nav, error_jpy, error_pct, drawdown_pct].
+const RANGES = { '1M': 31, '3M': 92, '1Y': 366, 'Max': Infinity };
+const histories = {};
+const yen = v => Math.round(v).toLocaleString('ja-JP') + '円';
+const pct = (v, d = 1) => (v > 0 ? '+' : '') + v.toFixed(d) + '%';
+
+async function openChart(card) {
+  const box = document.createElement('div');
+  box.className = 'chart';
+  Object.assign(box.dataset, { range: '3M', mode: 'nav' });
+  box.innerHTML = '<div class="tabs">'
+    + Object.keys(RANGES).map(r => `<button data-range="${r}">${r}</button>`).join('')
+    + '<span></span><button data-mode="nav">NAV</button><button data-mode="dd">Drawdown</button></div>'
+    + '<svg viewBox="0 0 320 140"></svg><div class="label">Loading…</div>';
+  card.append(box);
+  const id = card.dataset.fund;
+  try {
+    histories[id] ??= await fetch(`history/${id}.json`)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status));
+    draw(box, histories[id].rows);
+  } catch {
+    box.querySelector('.label').textContent = 'History unavailable.';
+  }
+}
+
+function draw(box, all) {
+  for (const t of box.querySelectorAll('.tabs button')) {
+    t.classList.toggle('on', t.dataset.range === box.dataset.range || t.dataset.mode === box.dataset.mode);
+  }
+  const days = RANGES[box.dataset.range];
+  const end = Date.parse(all.at(-1)[0]);
+  const rows = all.filter(r => end - Date.parse(r[0]) <= days * 864e5);
+  const dd = box.dataset.mode === 'dd';
+  const shown = rows.flatMap(r => dd ? [r[5]] : [r[1], r[2]]).filter(v => v != null);
+  const hi = dd ? 0 : Math.max(...shown), lo = Math.min(...shown);
+  const W = 320, H = 140, n = rows.length;
+  const x = i => n > 1 ? i / (n - 1) * W : W / 2;
+  const y = v => 6 + (hi - v) / ((hi - lo) || 1) * (H - 12);
+  const line = rows.map((r, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(dd ? r[5] : r[1]).toFixed(1)}`).join('');
+  const dots = dd ? '' : rows.map((r, i) => r[2] == null ? ''
+    : `<circle cx="${x(i).toFixed(1)}" cy="${y(r[2]).toFixed(1)}" r="1.8"/>`).join('');
+  const label = v => dd ? pct(v) : yen(v);
+  const svg = box.querySelector('svg');
+  svg.innerHTML = `<path d="${line}"/>${dots}`
+    + `<text x="${W - 2}" y="12" text-anchor="end">${label(hi)}</text>`
+    + `<text x="${W - 2}" y="${H - 2}" text-anchor="end">${label(lo)}</text>`
+    + '<line y1="0" y2="' + H + '"/>';
+  const tip = box.querySelector('.label');
+  const show = i => {
+    const r = rows[i];
+    svg.querySelector('line').setAttribute('x1', x(i));
+    svg.querySelector('line').setAttribute('x2', x(i));
+    tip.textContent = `${r[0]} · NAV ${yen(r[1])}`
+      + (r[2] == null ? '' : ` · estimate ${yen(r[2])} (${r[3] > 0 ? '+' : ''}${Math.round(r[3])}円, ${pct(r[4], 2)})`)
+      + ` · ${pct(r[5])} from high`;
+  };
+  svg.onpointermove = e => {
+    const box = svg.getBoundingClientRect();
+    show(Math.max(0, Math.min(n - 1, Math.round((e.clientX - box.left) / box.width * (n - 1)))));
+  };
+  show(n - 1);
+}
 </script>
 </body>
 </html>
