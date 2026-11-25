@@ -21,7 +21,7 @@ built). Tests are named after the IDs where they can be, and commits cite them (
 | Feature | IDs | State | Spec | Plan |
 |---|---|---|---|---|
 | NAV estimate and display | NAV-1–4, NFR-4 | Built | [spec](docs/features/nav-estimate/spec.md) | [plan](docs/features/nav-estimate/plan.md) |
-| Estimation rules | EST-1–8, NFR-5 | Built | [spec](docs/features/estimation/spec.md) | [plan](docs/features/estimation/plan.md) |
+| Estimation rules | EST-1–9, NFR-5 | Built | [spec](docs/features/estimation/spec.md) | [plan](docs/features/estimation/plan.md) |
 | Fund coverage (34 funds) | FUND-1–3 | Built | [spec](docs/features/funds/spec.md) | [plan](docs/features/funds/plan.md) |
 | Accuracy and drawdown | ACC-1–3 | Built | [spec](docs/features/accuracy/spec.md) | [plan](docs/features/accuracy/plan.md) |
 | Factor attribution | ATTR-1–6 | Built | [spec](docs/features/attribution/spec.md) | [plan](docs/features/attribution/plan.md) |

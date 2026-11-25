@@ -22,6 +22,7 @@ Keep the site up to date by itself, and never publish worse data than it already
 | Data | Source |
 |---|---|
 | Index, ETF, gold, Bitcoin and USD/JPY prices | Yahoo Finance chart API: `https://query1.finance.yahoo.com/v8/finance/chart/<ticker>?interval=<1d or 60m>&range=<5y, 5d or 1mo>`; closes in `chart.result[0].indicators.quote[0].close`, bar start times in `timestamp` |
+| MSCI index levels (MSCI ACWI `892400`, MSCI World `990100`) | MSCI: `https://app2.msci.com/products/service/index/indexmaster/getLevelDataForGraph?currency_symbol=USD&index_variant=NETR&start_date=<yyyymmdd>&end_date=<yyyymmdd>&data_frequency=DAILY&index_codes=<code>`; levels in `indexes.INDEX_LEVELS[]` as `{level_eod, calc_date: yyyymmdd}` |
 | Fund NAVs since inception | Each fund's CSV ([funds](../funds/spec.md)): one row per day, first column the date (`2026/11/02` or `2026年11月02日`), second the NAV |
 | USD TTM | MUFG: `https://www.murc-kawasesouba.jp/fx/past/index.php?id=<yymmdd>`; the page for that day says `As of <Month> <D>, <YYYY>`, and its USD row has TTS then TTB; a day not archived yet shows another date |
 

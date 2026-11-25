@@ -651,6 +651,8 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
 
     // Many funds share an index; fetch each once.
     let mut cache: HashMap<&str, Vec<SeriesPoint>> = HashMap::new();
+    // MSCI's levels per index; None when they couldn't be fetched, so the ETF alone is used.
+    let mut msci_cache: HashMap<&str, Option<Vec<SeriesPoint>>> = HashMap::new();
     let mut funds = Vec::new();
     for f in FUNDS {
         let name = f.name;
@@ -695,7 +697,23 @@ fn estimate_funds(history: &mut Value) -> Vec<FundResult> {
                         Some(series) => series,
                         None => cache.entry(ticker).or_insert(fetch_series(ticker)?),
                     };
-                    legs.push((ticker, weight, change_between(series, date, target)?));
+                    let msci = msci_code(ticker).and_then(|code| {
+                        msci_cache
+                            .entry(code)
+                            .or_insert_with(|| {
+                                fetch_msci(code)
+                                    .inspect_err(|e| {
+                                        eprintln!("Failed to fetch MSCI {}: {:#}", code, e)
+                                    })
+                                    .ok()
+                            })
+                            .as_deref()
+                    });
+                    let change = match msci {
+                        Some(msci) => msci_change(msci, series, date, target)?,
+                        None => change_between(series, date, target)?,
+                    };
+                    legs.push((ticker, weight, change));
                 }
                 let fx = if f.hedged {
                     None
@@ -915,6 +933,72 @@ fn score(list: &[Value]) -> Accuracy {
     }
 }
 
+/// The MSCI index an ETF leg stands in for: MSCI ACWI and MSCI World.
+fn msci_code(ticker: &str) -> Option<&'static str> {
+    match ticker {
+        "ACWI" => Some("892400"),
+        "URTH" => Some("990100"),
+        _ => None,
+    }
+}
+
+/// MSCI's published end-of-day levels (net dividends, USD) for the last 30 days, oldest first.
+fn fetch_msci(code: &str) -> Result<Vec<SeriesPoint>> {
+    let end = Utc::now().date_naive();
+    let url = format!(
+        "https://app2.msci.com/products/service/index/indexmaster/getLevelDataForGraph?currency_symbol=USD&index_variant=NETR&start_date={}&end_date={}&data_frequency=DAILY&index_codes={}",
+        (end - Duration::days(30)).format("%Y%m%d"),
+        end.format("%Y%m%d"),
+        code
+    );
+    let text = reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; SunnyDayBot/1.0)")
+        .build()?
+        .get(&url)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.text())
+        .with_context(|| format!("fetch MSCI {}", code))?;
+    parse_msci(&text).with_context(|| format!("parse MSCI {}", code))
+}
+
+fn parse_msci(text: &str) -> Result<Vec<SeriesPoint>> {
+    let resp: Value = serde_json::from_str(text)?;
+    let levels = resp["indexes"]["INDEX_LEVELS"]
+        .as_array()
+        .ok_or_else(|| anyhow!("no INDEX_LEVELS"))?;
+    let mut series = Vec::new();
+    for l in levels {
+        let (Some(close), Some(day)) = (l["level_eod"].as_f64(), l["calc_date"].as_i64()) else {
+            continue;
+        };
+        let date = NaiveDate::parse_from_str(&day.to_string(), "%Y%m%d")?;
+        let at = date.and_hms_opt(0, 0, 0).unwrap().and_utc();
+        series.push(SeriesPoint { date, at, close });
+    }
+    if series.is_empty() {
+        return Err(anyhow!("no levels"));
+    }
+    Ok(series)
+}
+
+/// An MSCI leg: MSCI's change up to its latest published day before `target`, times the ETF's
+/// change after that day.
+fn msci_change(
+    msci: &[SeriesPoint],
+    etf: &[SeriesPoint],
+    nav_date: NaiveDate,
+    target: NaiveDate,
+) -> Result<f64> {
+    let last = msci
+        .iter()
+        .rev()
+        .find(|p| p.date < target)
+        .ok_or_else(|| anyhow!("no MSCI level before {}", target))?;
+    let after = change_between(etf, last.date.succ_opt().unwrap(), target)?;
+    Ok(change_between(msci, nav_date, target)? * after)
+}
+
 /// The USD TTM (midpoint of TTS and TTB) MUFG published for `date`; None until it is out.
 /// Funds convert their NAV at this rate, set around 10:00 JST.
 fn usd_ttm(date: NaiveDate) -> Result<Option<f64>> {
@@ -974,7 +1058,7 @@ fn parse_nav(text: &str) -> Vec<(NaiveDate, f64)> {
 
 /// Latest close / last close dated before `nav_date`. A NAV for Japan date D is priced at the
 /// foreign closes of the day before D and at D's morning USD/JPY, which is the close before D.
-// ponytail: ignores ETF ex-dividend drops (ACWI, twice a year) and Japan-stock timing; correct for them if the error matters.
+// ponytail: ignores ETF ex-dividend drops on days MSCI hasn't published (ACWI, twice a year); correct for them if the error matters.
 /// Latest close / close of the last bar that started before `at`.
 /// The rate an estimate converts to: the target date's TTM once it is out, else `live()`.
 fn now_rate(target_ttm: Result<Option<f64>>, live: impl FnOnce() -> f64) -> f64 {
@@ -1482,7 +1566,7 @@ mod tests {
 
     use super::{
         Accuracy, FundResult, HISTORY_KEEP, accuracy_line, build_html, classify, etf_change,
-        fund_card, fx_part, now_rate, parse_nav, read_history,
+        fund_card, fx_part, msci_change, now_rate, parse_msci, parse_nav, read_history,
     };
 
     fn day(s: &str) -> NaiveDate {
@@ -1866,6 +1950,32 @@ mod tests {
         ];
         let r = change_between(&series, d("2026-11-02"), d("2026-11-04")).unwrap();
         assert_eq!(r, 1.02);
+    }
+
+    #[test]
+    fn follows_msci_then_the_etf() {
+        // EST-9
+        let d = |s: &str| s.parse::<NaiveDate>().unwrap();
+        let p = |s: &str, close| SeriesPoint {
+            date: d(s),
+            at: Utc::now(),
+            close,
+        };
+        let msci = parse_msci(
+            r#"{"indexes":{"INDEX_LEVELS":[{"level_eod":100.0,"calc_date":20261123},{"level_eod":101.0,"calc_date":20261124}]}}"#,
+        )
+        .unwrap();
+        let etf = [
+            p("2026-11-23", 50.0),
+            p("2026-11-24", 49.0),
+            p("2026-11-25", 49.49),
+        ];
+        // NAV 11/24 to 11/25: MSCI's 11/24 level is out, so the ETF's -2% doesn't count.
+        let r = msci_change(&msci, &etf, d("2026-11-24"), d("2026-11-25")).unwrap();
+        assert!((r - 1.01).abs() < 1e-9);
+        // To 11/26 before MSCI has 11/25: MSCI to 11/24, then the ETF's +1% on 11/25.
+        let r = msci_change(&msci, &etf, d("2026-11-24"), d("2026-11-26")).unwrap();
+        assert!((r - 1.01 * 1.01).abs() < 1e-9);
     }
 
     #[test]

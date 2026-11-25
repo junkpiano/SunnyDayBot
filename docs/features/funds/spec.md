@@ -17,7 +17,8 @@ described by:
 - **Legs:** the Yahoo Finance tickers it follows, with a weight. The fund's change is the
   weighted sum of the legs' changes: a weight of 2 is a 2x leveraged fund, two legs of 1 are a
   100% + 100% fund. Where an index's own daily closes are unreliable, a liquid ETF stands in
-  for it (ACWI, URTH, GLDM).
+  for it (ACWI, URTH, GLDM); ACWI and URTH follow MSCI's own levels once they are published
+  (see [estimation](../estimation/spec.md)).
 - **Hedged:** hedged to yen, so USD/JPY doesn't move its NAV.
 - **Tokyo ETF:** the Tokyo-listed ETF the fund holds, for a fund priced at its NAV date's own
   Tokyo close (see [estimation](../estimation/spec.md)).

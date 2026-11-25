@@ -15,6 +15,12 @@ the NAV is out.
 - **Estimate** = latest NAV × index change × currency change:
   - **Index change** = 1 + Σ weight × (leg change − 1). A leg's change runs from its last close
     before the NAV date to its last close before the target date.
+  - **MSCI legs:** a leg standing in for an MSCI index (ACWI for MSCI ACWI, URTH for MSCI World)
+    takes its closes from MSCI's published end-of-day levels (net dividends, in USD), which use
+    each market's own close, as the fund's index does. The ETF trades only in US hours, so it
+    prices a market that was closed (a Japanese holiday, say) a day early. Days MSCI hasn't
+    published yet are filled in with the ETF's change since MSCI's latest day; without MSCI's
+    levels the leg is the ETF alone.
   - **Currency change** (unhedged funds only) = current USD/JPY ÷ the NAV date's TTM. The
     current rate is the target date's TTM once it is out; before that the latest hourly
     USD/JPY close, or the latest daily close if the hourly one can't be had (daily USD/JPY
@@ -41,6 +47,8 @@ the NAV is out.
   a run after that is never the one scored.
 - EST-8: The TTM is read from MUFG's page for the exact date, and nothing is returned when the
   page is for another date.
+- EST-9: An MSCI leg follows MSCI's levels up to MSCI's latest published day before the target
+  and the ETF's change after it; with no MSCI levels, it follows the ETF.
 
 ## Non-functional
 
@@ -57,4 +65,4 @@ Known gaps, each small next to the daily move; correct for them if the error mat
 - Leveraged funds reset daily, so across a holiday the estimate drifts a little.
 - Hedge cost.
 - A distribution fund's drop by its payout on the record date.
-- ETF ex-dividend drops (ACWI, twice a year).
+- ETF ex-dividend drops on a day MSCI hasn't published yet (ACWI, twice a year).
